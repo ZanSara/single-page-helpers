@@ -44,6 +44,72 @@
       background: rgba(198, 40, 40, 0.2);
       border-color: rgba(198, 40, 40, 0.5);
     }
+
+    /* Line numbers for textarea */
+    .textarea-wrapper {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+    }
+
+    .line-numbers {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 40px;
+      padding: 2px 4px;
+      padding-right: 8px;
+      background: rgba(127,127,127,0.05);
+      border-right: 1px solid rgba(127,127,127,0.2);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 19.5px; /* Match textarea line height */
+      color: rgba(127,127,127,0.6);
+      text-align: right;
+      user-select: none;
+      pointer-events: none;
+      overflow: hidden;
+      white-space: pre;
+      height: 100%;
+    }
+
+    #out {
+      padding-left: 54px !important;
+      font-size: 13px;
+      line-height: 19.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    #lineNumbersMirror {
+      position: absolute;
+      visibility: hidden;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-size: 13px;
+      line-height: 19.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      padding: 2px;
+    }
+
+    /* Diff view styles */
+    .diff-line {
+      padding: 2px 4px;
+      margin: 0;
+    }
+    .diff-line-added {
+      color: #22863a;
+      border-left: 3px solid #22863a;
+    }
+    .diff-line-removed {
+      color: #cb2431;
+      border-left: 3px solid #cb2431;
+    }
+    .diff-line-unchanged {
+      color: var(--text-color);
+    }
   </style>
 </head>
 <body>
@@ -90,8 +156,8 @@
 
 
   <div style="display: flex; flex-direction: row; gap: 20px;">
-    <button id="start" class="primary">Start OCR</button>
-    <button id="abort" disabled>Abort</button>
+    <button id="start" class="primary">Start Scan</button>
+    <button id="abort" disabled>Stop Scan</button>
 
     <label style="margin: auto 0;">Rescan Page:</label>
     <input id="rescanPageNum" type="number" min="1" placeholder="Page #" style="width: 100px;" />
@@ -109,13 +175,47 @@
 
   <div>
     <h3>Extracted Text</h3>
-    <textarea id="out" rows="18" class="mono" placeholder="Output will appear here..."></textarea>
+    <div class="textarea-wrapper">
+      <div id="lineNumbers" class="line-numbers"></div>
+      <textarea id="out" style="padding:0;" rows="18" placeholder="Output will appear here..."></textarea>
+      <div id="lineNumbersMirror"></div>
+    </div>
   </div>
 
   <div id="emptyPagesSection">
     <label>Empty Pages</label>
     <div id="emptyPagesList" style="display: grid; grid-template-columns: repeat(10, auto); gap: 10px;"></div>
     <div class="input-hint" style="margin-top: 6px;">Click a page number to quickly Rescan it.</div>
+  </div>
+
+  <div style="margin-top: 20px;">
+    <h3>Review Text</h3>
+    <div style="display: flex; flex-direction: row; gap: 20px; align-items: end;">
+      <div>
+        <label>Start Line</label>
+        <input id="reviewStartLine" type="number" min="1" value="1" style="width: 100px;" />
+        <div class="input-hint" style="margin-top:6px;">Review 123 lines starting from this line</div>
+      </div>
+      <button id="reviewBlockBtn" disabled>Review Block</button>
+      <button id="reviewAllBtn" disabled>Review All (Auto)</button>
+    </div>
+  </div>
+
+  <div id="diffSection" style="display: none; margin-top: 20px;">
+    <h3>Review Changes (Lines <span id="diffLineRange"></span>)</h3>
+    <div style="margin-bottom: 12px;">
+      <div id="diffView" style="border: 1px solid rgba(127,127,127,0.3); border-radius: 8px; padding: 12px; background: #fafafa; max-height: 500px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap;"></div>
+    </div>
+    <div style="margin-bottom: 12px;">
+      <label>Edit Reviewed Text (optional)</label>
+      <textarea id="diffReviewed" rows="8" class="mono" style="width: 100%; background: rgba(200,255,200,0.1);"></textarea>
+      <div class="input-hint" style="margin-top: 4px;">You can edit the reviewed text above before applying changes.</div>
+    </div>
+    <div style="display: flex; gap: 12px;">
+      <button id="diffApprove" class="primary">Apply Changes</button>
+      <button id="diffRetry">Retry Review</button>
+      <button id="diffCancel">Cancel</button>
+    </div>
   </div>
 
   <div>
@@ -129,6 +229,7 @@
     import { marked } from "https://cdn.jsdelivr.net/npm/marked@13.0.2/+esm";
     import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.1.6/+esm";
     import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.mjs";
+    import * as Diff from "https://cdn.jsdelivr.net/npm/diff@5.1.0/+esm";
 
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs";
@@ -151,15 +252,31 @@
     const progEl    = $("progress");
     const logEl     = $("log");
     const outEl     = $("out");
+    const lineNumbersEl = $("lineNumbers");
+    const lineNumbersMirrorEl = $("lineNumbersMirror");
     const mdPreviewEl = $("mdPreview");
     const emptyPagesSectionEl = $("emptyPagesSection");
     const emptyPagesListEl = $("emptyPagesList");
+
+    const reviewStartLineEl = $("reviewStartLine");
+    const reviewBlockBtn = $("reviewBlockBtn");
+    const reviewAllBtn = $("reviewAllBtn");
+    const diffSectionEl = $("diffSection");
+    const diffLineRangeEl = $("diffLineRange");
+    const diffViewEl = $("diffView");
+    const diffReviewedEl = $("diffReviewed");
+    const diffApproveBtn = $("diffApprove");
+    const diffRetryBtn = $("diffRetry");
+    const diffCancelBtn = $("diffCancel");
+
     const canvas    = $("canvas");
     const ctx       = canvas.getContext("2d", { alpha: false });
 
     let abortController = null;
     let currentPdf = null;
     let currentTotalPages = 0;
+    let currentReviewBlock = null; // Stores info about the block being reviewed
+    let isAutoReviewing = false;
 
     function log(msg, cls = "") {
       const line = cls ? `<span class="${cls}">${escapeHtml(msg)}</span>` : escapeHtml(msg);
@@ -391,8 +508,8 @@
     // //   const endpoint = "https://api.together.xyz/v1/chat/completions";
 
     // //   const system = [
-    // //     "You are reviewing OCR output for ONE page of a scanned document.",
-    // //     "Correct OCR mistakes and formatting issues while preserving meaning.",
+    // //     "You are reviewing Scan output for ONE page of a scanned document.",
+    // //     "Correct Scan mistakes and formatting issues while preserving meaning.",
     // //     "Fix Markdown structure: headings, lists, tables, spacing, punctuation, broken words.",
     // //     "Do NOT invent text that is not present; do NOT add commentary.",
     // //     "Remove headers, footers, page numbers, and obvious scanner artifacts.",
@@ -478,6 +595,56 @@
       return json?.choices?.[0]?.message?.content ?? "";
     }
 
+    async function reviewTextWithLLM({
+      text,
+      endpoint,
+      apiKey,
+      model,
+      signal,
+      timeoutMs = 90_000,
+      maxRetries = 3,
+      onRetry
+    }) {
+      const system = [
+        "You are reviewing OCR-extracted text from a document.",
+        "Fix any Scan mistakes like character misrecognition, broken words, or formatting errors.",
+        "Never delete any comments, even if they are in the middle of a word. For example in the following text:",
+        "'beutif-\n\n<!-- Page 45 -->\n\nul', return beutif<!-- Page 45 -->ul' to make the word look unbroken.",
+        "Do not add or remove content.",
+        "Keep existing markdown formatting intact (headers, lists, tables, etc.).",
+        "In some cases, the OCR engine did not merge broken lines into a single line. Fix that.",
+        "In some cases, the OCR engine added non existing intentation in the middle of regular text. Remove that.",
+        "Occasionally the OCR engine got stuck to all caps for a whole paragraph or more. Fix that by reintroducing normal capitalization.",
+        "Titles are not recognized by the OCR engine. Make sure they're all represented as Markdown headings (and don't let the capitalization confuse you).",
+        "Tables may have not been recognized by the OCR engine: fix them to render correctly as Markdown tables.",
+        "Table of Content and other indices may have not been recognized by the OCR engine: fix them to render ",
+        "correctly, with page numbers on the same line as the chapter titles.",
+        "If the text looks correct, return it unchanged.",
+        "Output ONLY the corrected text, no explanations or markdown fences."
+      ].join(" ");
+
+      const body = {
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: text }
+        ]
+      };
+
+      const res = await fetchWithTimeoutAndRetry(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      }, { timeoutMs, maxRetries, signal, onRetry });
+
+      const json = await res.json();
+      return json?.choices?.[0]?.message?.content ?? "";
+    }
+
     function renderMarkdownPreview(mdText) {
       const rawHtml = marked.parse(mdText || "", { breaks: true });
       const cleanHtml = DOMPurify.sanitize(rawHtml, {
@@ -489,6 +656,84 @@
         ALLOWED_ATTR: ["href","title"]
       });
       mdPreviewEl.innerHTML = cleanHtml;
+    }
+
+    function updateLineNumbers() {
+      const lines = outEl.value.split('\n');
+      const lineCount = lines.length;
+
+      // Set mirror width to match textarea content area
+      const textareaStyles = window.getComputedStyle(outEl);
+      const paddingLeft = parseFloat(textareaStyles.paddingLeft);
+      const paddingRight = parseFloat(textareaStyles.paddingRight);
+      const contentWidth = outEl.clientWidth - paddingLeft - paddingRight;
+      lineNumbersMirrorEl.style.width = contentWidth + 'px';
+
+      // Build line numbers accounting for wrapped lines
+      let lineNumbersHtml = '';
+      const lineHeight = parseFloat(textareaStyles.lineHeight);
+
+      for (let i = 0; i < lineCount; i++) {
+        const lineNum = i + 1;
+        const lineText = lines[i] || ' '; // Use space for empty lines
+
+        // Render the line in the mirror to measure its height
+        lineNumbersMirrorEl.textContent = lineText;
+        const lineRenderedHeight = lineNumbersMirrorEl.offsetHeight;
+
+        // Calculate how many visual lines this takes
+        const visualLines = Math.max(1, Math.round(lineRenderedHeight / lineHeight));
+
+        // Add the line number for the first visual line
+        lineNumbersHtml += lineNum + '\n';
+
+        // Add empty lines for wrapped portions
+        for (let j = 1; j < visualLines; j++) {
+          lineNumbersHtml += '\n';
+        }
+      }
+
+      lineNumbersEl.textContent = lineNumbersHtml;
+
+      // Match the padding of the textarea
+      lineNumbersEl.style.paddingTop = textareaStyles.paddingTop;
+      lineNumbersEl.style.paddingBottom = textareaStyles.paddingBottom;
+
+      // Enable/disable review buttons based on content
+      const hasContent = outEl.value.trim().length > 0;
+      reviewBlockBtn.disabled = !hasContent;
+      reviewAllBtn.disabled = !hasContent;
+    }
+
+    function renderDiff(originalText, reviewedText) {
+      const diff = Diff.diffTrimmedLines(originalText, reviewedText);
+      let html = '';
+
+      diff.forEach((part) => {
+        const lines = part.value.split('\n');
+        // Remove last empty line if exists
+        if (lines[lines.length - 1] === '') lines.pop();
+
+        lines.forEach((line) => {
+          let className = 'diff-line';
+          let prefix = ' ';
+
+          if (part.added) {
+            className += ' diff-line-added';
+            prefix = '+';
+          } else if (part.removed) {
+            className += ' diff-line-removed';
+            prefix = '-';
+          } else {
+            className += ' diff-line-unchanged';
+          }
+
+          const escapedLine = escapeHtml(line || ' ');
+          html += `<div class="${className}">${prefix} ${escapedLine}</div>`;
+        });
+      });
+
+      diffViewEl.innerHTML = html;
     }
 
     function findEmptyPages(mdText) {
@@ -532,6 +777,180 @@
         });
         emptyPagesListEl.appendChild(badge);
       });
+    }
+
+    async function reviewBlock(startLine) {
+      const apiKey = apiKeyEl.value.trim();
+      const endpoint = endpointEl.value.trim();
+      if (!endpoint) {
+        log("Please enter an LLM endpoint.", "err");
+        return;
+      }
+
+      const model = modelEl.value;
+      const lines = outEl.value.split('\n');
+      const lineCount = lines.length;
+
+      // Validate start line
+      if (startLine < 1 || startLine > lineCount) {
+        log(`Invalid start line. Must be between 1 and ${lineCount}.`, "err");
+        return;
+      }
+
+      // Extract 123 lines starting from startLine
+      const blockSize = 123;
+      const startIdx = startLine - 1; // Convert to 0-indexed
+      const endIdx = Math.min(startIdx + blockSize, lineCount);
+      const blockLines = lines.slice(startIdx, endIdx);
+      const originalText = blockLines.join('\n');
+
+      // Store current review block info
+      currentReviewBlock = {
+        startLine,
+        endLine: startLine + blockLines.length - 1,
+        startIdx,
+        endIdx,
+        originalText
+      };
+
+      // Show diff section
+      diffLineRangeEl.textContent = `${currentReviewBlock.startLine}-${currentReviewBlock.endLine}`;
+      diffViewEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">Reviewing...</div>';
+      diffReviewedEl.value = "";
+      diffSectionEl.style.display = "block";
+
+      // Disable controls while reviewing
+      setBusy(true);
+      diffApproveBtn.disabled = true;
+      diffRetryBtn.disabled = true;
+
+      try {
+        log(`\nReviewing lines ${currentReviewBlock.startLine}-${currentReviewBlock.endLine}...`);
+
+        const reviewedText = await reviewTextWithLLM({
+          text: originalText,
+          endpoint,
+          apiKey,
+          model,
+          signal: abortController?.signal,
+          onRetry: ({ attempt, maxRetries, reason, delayMs }) => {
+            log(
+              `Review retry ${attempt}/${maxRetries} (${reason}) in ${Math.ceil(delayMs/1000)}s…`,
+              "warn"
+            );
+          }
+        });
+
+        // Store reviewed text in the edit textarea
+        diffReviewedEl.value = reviewedText;
+
+        // Render the diff view
+        renderDiff(originalText, reviewedText);
+
+        // Check if there are any differences
+        const hasDifferences = originalText.trim() !== reviewedText.trim();
+
+        if (hasDifferences) {
+          log(`Review complete: Changes detected.`, "ok");
+          diffApproveBtn.disabled = false;
+          diffRetryBtn.disabled = false;
+        } else {
+          log(`Review complete: No changes needed.`, "ok");
+
+          // Auto-apply if no differences
+          if (isAutoReviewing) {
+            setTimeout(() => applyReviewChanges(), 500);
+          } else {
+            diffApproveBtn.disabled = false;
+            diffRetryBtn.disabled = false;
+          }
+        }
+      } catch (err) {
+        log(`Review error: ${err?.message ?? String(err)}`, "err");
+        diffViewEl.innerHTML = `<div style="padding: 20px; color: #c62828;">Error: ${escapeHtml(err?.message ?? String(err))}</div>`;
+        diffRetryBtn.disabled = false;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function applyReviewChanges() {
+      if (!currentReviewBlock) return;
+
+      const reviewedText = diffReviewedEl.value;
+      const lines = outEl.value.split('\n');
+
+      // Replace the block with reviewed text
+      const before = lines.slice(0, currentReviewBlock.startIdx);
+      const after = lines.slice(currentReviewBlock.endIdx);
+      const newLines = reviewedText.split('\n');
+
+      const newContent = [...before, ...newLines, ...after].join('\n');
+      outEl.value = newContent;
+
+      renderMarkdownPreview(newContent);
+      updateLineNumbers();
+      updateEmptyPagesDisplay();
+
+      log(`Applied changes to lines ${currentReviewBlock.startLine}-${currentReviewBlock.endLine}.`, "ok");
+
+      // Save the end line before clearing currentReviewBlock
+      const lastEndLine = currentReviewBlock.endLine;
+
+      // Hide diff section
+      diffSectionEl.style.display = "none";
+      currentReviewBlock = null;
+
+      // Continue auto-review if active
+      if (isAutoReviewing) {
+        continueAutoReview(lastEndLine);
+      }
+    }
+
+    function cancelReview() {
+      diffSectionEl.style.display = "none";
+      currentReviewBlock = null;
+      isAutoReviewing = false;
+      setBusy(false);
+      log("Review cancelled.", "warn");
+    }
+
+    async function reviewAll(startLine = 1) {
+      isAutoReviewing = true;
+      const lines = outEl.value.split('\n');
+      const lineCount = lines.length;
+
+      // Validate start line
+      if (startLine < 1 || startLine > lineCount) {
+        log(`Invalid start line. Must be between 1 and ${lineCount}.`, "err");
+        isAutoReviewing = false;
+        return;
+      }
+
+      log(`\nStarting auto-review from line ${startLine} in blocks of 123...`, "ok");
+
+      // Start from specified line
+      await reviewBlock(startLine);
+    }
+
+    async function continueAutoReview(lastEndLine) {
+      if (!isAutoReviewing) return;
+
+      const lines = outEl.value.split('\n');
+      const lineCount = lines.length;
+
+      // Find next block to review
+      const nextStartLine = lastEndLine ? lastEndLine + 1 : 1;
+
+      if (nextStartLine > lineCount) {
+        // All done
+        isAutoReviewing = false;
+        log("\nAuto-review complete!", "ok");
+        return;
+      }
+
+      // Review next block
+      await reviewBlock(nextStartLine);
     }
 
     async function run() {
@@ -579,16 +998,16 @@
           existingPageSet.add(parseInt(match[1], 10));
         }
 
-        // Determine which pages need to be OCR'd
-        const pagesToOcr = [];
+        // Determine which pages need to be Scan'd
+        const pagesToScan = [];
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
           if (!existingPageSet.has(pageNum)) {
-            pagesToOcr.push(pageNum);
+            pagesToScan.push(pageNum);
           }
         }
 
-        if (pagesToOcr.length === 0) {
-          log("All pages already exist in the output. Nothing to OCR.", "ok");
+        if (pagesToScan.length === 0) {
+          log("All pages already exist in the output. Nothing to Scan.", "ok");
           setProgress(totalPages, totalPages, "Complete.");
 
           // Still create download link for existing content
@@ -602,13 +1021,13 @@
           return;
         }
 
-        log(`Found ${existingPageSet.size} existing page(s). Will OCR ${pagesToOcr.length} missing page(s).`, "ok");
+        log(`Found ${existingPageSet.size} existing page(s). Will Scan ${pagesToScan.length} missing page(s).`, "ok");
 
         // Progress starts at number of existing pages
         let completedPages = existingPageSet.size;
-        setProgress(completedPages, totalPages, `Starting OCR: ${completedPages}/${totalPages} pages already done.`);
+        setProgress(completedPages, totalPages, `Starting Scan: ${completedPages}/${totalPages} pages already done.`);
 
-        for (const pageNum of pagesToOcr) {
+        for (const pageNum of pagesToScan) {
           if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
 
           log(`\nPage ${pageNum}/${totalPages}: rendering…`);
@@ -626,9 +1045,9 @@
           setProgress(completedPages, totalPages, `Encoding image ${pageNum}/${totalPages}…`);
           const dataUrl = await canvasToJpegDataUrl(uploadCanvas, 0.9);
 
-          // ----- OCR step -----
-          setProgress(completedPages, totalPages, `OCR (page ${pageNum}/${totalPages})…`);
-          log(`Page ${pageNum}: OCR…`);
+          // ----- Scan step -----
+          setProgress(completedPages, totalPages, `Scan (page ${pageNum}/${totalPages})…`);
+          log(`Page ${pageNum}: Scan…`);
 
           const mdRaw = await transcribePageImageToMarkdown({
             pageNum,
@@ -639,7 +1058,7 @@
             signal: abortController.signal,
             onRetry: ({ attempt, maxRetries, reason, delayMs, status }) => {
               log(
-                `Page ${pageNum} OCR: retry ${attempt}/${maxRetries} (${reason}${status ? ` ${status}` : ""}) in ${Math.ceil(delayMs/1000)}s…`,
+                `Page ${pageNum} Scan: retry ${attempt}/${maxRetries} (${reason}${status ? ` ${status}` : ""}) in ${Math.ceil(delayMs/1000)}s…`,
                 "warn"
               );
             }
@@ -697,7 +1116,7 @@
           renderMarkdownPreview(outEl.value);
           updateEmptyPagesDisplay();
 
-          log(`Page ${pageNum}: OCR done. (${cleaned.length} chars)`, "ok");
+          log(`Page ${pageNum}: Scan done. (${cleaned.length} chars)`, "ok");
           setProgress(completedPages, totalPages, `Done ${completedPages}/${totalPages}…`);
         }
 
@@ -712,7 +1131,7 @@
         dlLink.href = url;
         dlLink.download = "output.md";
 
-        log("\nOCR complete. Download is ready.", "ok");
+        log("\nScan complete. Download is ready.", "ok");
         setProgress(totalPages, totalPages, "Complete.");
         dlLink.style.display = "";
       } catch (err) {
@@ -739,7 +1158,7 @@
       const pageNum = parseInt(rescanPageNumEl.value, 10);
 
       if (!currentPdf) {
-        log("No PDF loaded. Please run OCR first.", "err");
+        log("No PDF loaded. Please run Scan first.", "err");
         return;
       }
 
@@ -777,7 +1196,7 @@
         const uploadCanvas = downscaleToMaxDim(canvas, maxDim);
         const dataUrl = await canvasToJpegDataUrl(uploadCanvas, 0.9);
 
-        // OCR the page
+        // Scan the page
         const mdRaw = await transcribePageImageToMarkdown({
           pageNum,
           endpoint,
@@ -787,7 +1206,7 @@
           signal: abortController.signal,
           onRetry: ({ attempt, maxRetries, reason, delayMs, status }) => {
             log(
-              `Page ${pageNum} OCR: retry ${attempt}/${maxRetries} (${reason}${status ? ` ${status}` : ""}) in ${Math.ceil(delayMs/1000)}s…`,
+              `Page ${pageNum} Scan: retry ${attempt}/${maxRetries} (${reason}${status ? ` ${status}` : ""}) in ${Math.ceil(delayMs/1000)}s…`,
               "warn"
             );
           }
@@ -904,6 +1323,49 @@
     outEl.addEventListener("input", () => {
       renderMarkdownPreview(outEl.value);
       updateEmptyPagesDisplay();
+      updateLineNumbers();
+    });
+
+    outEl.addEventListener("scroll", () => {
+      lineNumbersEl.scrollTop = outEl.scrollTop;
+    });
+
+    diffReviewedEl.addEventListener("input", () => {
+      if (!currentReviewBlock) return;
+
+      // Re-render diff with the edited text
+      renderDiff(currentReviewBlock.originalText, diffReviewedEl.value);
+    });
+
+    reviewBlockBtn.addEventListener("click", async () => {
+      const startLine = parseInt(reviewStartLineEl.value, 10);
+      if (Number.isInteger(startLine) && startLine >= 1) {
+        abortController = new AbortController();
+        await reviewBlock(startLine);
+      } else {
+        log("Please enter a valid start line number.", "err");
+      }
+    });
+
+    reviewAllBtn.addEventListener("click", async () => {
+      const startLine = parseInt(reviewStartLineEl.value, 10) || 1;
+      abortController = new AbortController();
+      await reviewAll(startLine);
+    });
+
+    diffApproveBtn.addEventListener("click", () => {
+      applyReviewChanges();
+    });
+
+    diffRetryBtn.addEventListener("click", async () => {
+      if (currentReviewBlock) {
+        abortController = new AbortController();
+        await reviewBlock(currentReviewBlock.startLine);
+      }
+    });
+
+    diffCancelBtn.addEventListener("click", () => {
+      cancelReview();
     });
 
     startBtn.addEventListener("click", async () => {
@@ -929,6 +1391,10 @@
     if (outEl.value.trim()) {
       updateEmptyPagesDisplay();
       renderMarkdownPreview(outEl.value);
+      updateLineNumbers();
+    } else {
+      // Initialize line numbers even if empty
+      updateLineNumbers();
     }
 
     setProgress(0, 1, "Idle.");

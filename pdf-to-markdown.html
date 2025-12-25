@@ -1,0 +1,937 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scanned PDF → Markdown</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+    .card { border: 1px solid rgba(127,127,127,.35); border-radius: 12px; padding: 12px; }
+    .grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 12px; }
+    @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+    progress { width: 100%; height: 18px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    #previewWrap { display: grid; place-items: center; background: rgba(127,127,127,.08); border-radius: 12px; padding: 8px; min-height: 240px; }
+    canvas { max-width: 100%; height: auto; border-radius: 10px; } */
+    .status { white-space: pre-wrap; }
+    .ok { color: #2e7d32; }
+    .warn { color: #b26a00; }
+    .err { color: #c62828; }
+
+    /* Markdown preview */
+    #mdPreview { overflow-wrap: anywhere; border: 1px solid dimgrey;}
+    #mdPreview table { border-collapse: collapse; }
+    #mdPreview td, #mdPreview th { border: 1px solid rgba(127,127,127,.25); padding: 6px 8px; }
+    #mdPreview pre { overflow-x: auto; padding: 10px; border-radius: 10px; background: rgba(127,127,127,.08); }
+    #mdPreview code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; } */
+
+    /* Empty pages badges */
+    .page-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 4px;
+      background: rgba(198, 40, 40, 0.1);
+      border: 1px solid rgba(198, 40, 40, 0.3);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: #c62828;
+      transition: all 0.2s;
+    }
+    .page-badge:hover {
+      background: rgba(198, 40, 40, 0.2);
+      border-color: rgba(198, 40, 40, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <h2>Scanned PDF → Markdown</h2>
+
+  <div>
+    <label>PDF file</label>
+    <input id="pdfFile" type="file" accept="application/pdf" />
+  </div>
+
+  <div>
+    <label>LLM Endpoint</label>
+    <input id="endpoint" type="text" placeholder="https://..." /> 
+    <div class="input-hint" style="margin-top:6px;">For example https://api.together.xyz/v1/chat/completions</div>
+  </div>
+
+  <div>
+    <label>API Key (if needed)</label>
+    <input id="apiKey" type="password" placeholder="..." />
+    <div class="input-hint" style="margin-top:6px;">Uses simple HTTP Bearer auth</div>
+  </div>
+
+  <div>
+    <label>Model</label>
+    <input id="model" type="text" value="Qwen/Qwen3-VL-32B-Instruct" />
+    <div class="input-hint" style="margin-top:6px;">Use a vision-capable model.</div>
+  </div>
+
+  <div>
+    <label>Rendering scale</label>
+    <input id="scale" type="text" value="2.0" />
+    <div class="input-hint" style="margin-top:6px;">Higher = clearer, bigger images. Tip: 1.5-2.5 is usually fine.</div>
+  </div>
+
+  <div>
+    <label>Max image dimension (px)</label>
+    <input id="maxDim" type="text" value="800" />
+    <div class="input-hint" style="margin-top:6px;">Downscales huge pages to reduce payload.</div>
+  </div>
+
+  <label>Progress</label>
+  <progress id="progress" value="0" max="1"></progress>
+  <div id="log" class="status input-hint" style="margin-top:10px; max-height: 200px; overflow-y: scroll; border: 1px solid dimgrey; padding: 20px;"></div>
+
+
+  <div style="display: flex; flex-direction: row; gap: 20px;">
+    <button id="start" class="primary">Start OCR</button>
+    <button id="abort" disabled>Abort</button>
+
+    <label style="margin: auto 0;">Rescan Page:</label>
+    <input id="rescanPageNum" type="number" min="1" placeholder="Page #" style="width: 100px;" />
+    <button id="rescanBtn" disabled>Rescan Page</button>
+
+  </div>
+
+  <div style="display: none;">
+    <h3 style="margin-top:0;">Current page preview</h3>
+    <div id="previewWrap" style="padding: 20px;"><canvas id="canvas"></canvas></div>
+    <div class="input-hint" style="margin-top:8px;">
+      The image sent to the LLM is derived from this render (after optional downscaling + JPEG encoding).
+    </div>
+  </div>
+
+  <div>
+    <h3>Extracted Text</h3>
+    <textarea id="out" rows="18" class="mono" placeholder="Output will appear here..."></textarea>
+  </div>
+
+  <div id="emptyPagesSection">
+    <label>Empty Pages</label>
+    <div id="emptyPagesList" style="display: grid; grid-template-columns: repeat(10, auto); gap: 10px;"></div>
+    <div class="input-hint" style="margin-top: 6px;">Click a page number to quickly Rescan it.</div>
+  </div>
+
+  <div>
+    <h3>Final Preview</h3>
+    <div id="mdPreview"style="max-height: 600px; overflow-y: scroll;"></div>
+  </div>
+
+  <a id="download" download="output.md">Download Markdown</a>
+
+  <script type="module">
+    import { marked } from "https://cdn.jsdelivr.net/npm/marked@13.0.2/+esm";
+    import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3.1.6/+esm";
+    import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.mjs";
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs";
+
+    const $ = (id) => document.getElementById(id);
+
+    const pdfFileEl = $("pdfFile");
+    const endpointEl  = $("endpoint");
+    const apiKeyEl  = $("apiKey");
+    const modelEl   = $("model");
+    const scaleEl   = $("scale");
+    const maxDimEl  = $("maxDim");
+
+    const startBtn  = $("start");
+    const abortBtn  = $("abort");
+    const rescanBtn  = $("rescanBtn");
+    const rescanPageNumEl = $("rescanPageNum");
+    const dlLink    = $("download");
+
+    const progEl    = $("progress");
+    const logEl     = $("log");
+    const outEl     = $("out");
+    const mdPreviewEl = $("mdPreview");
+    const emptyPagesSectionEl = $("emptyPagesSection");
+    const emptyPagesListEl = $("emptyPagesList");
+    const canvas    = $("canvas");
+    const ctx       = canvas.getContext("2d", { alpha: false });
+
+    let abortController = null;
+    let currentPdf = null;
+    let currentTotalPages = 0;
+
+    function log(msg, cls = "") {
+      const line = cls ? `<span class="${cls}">${escapeHtml(msg)}</span>` : escapeHtml(msg);
+      logEl.innerHTML += line + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    log("Idle");
+
+    function setBusy(busy) {
+      startBtn.disabled = busy;
+      abortBtn.disabled = !busy;
+      pdfFileEl.disabled = busy;
+      endpointEl.disabled = busy;
+      apiKeyEl.disabled = busy;
+      modelEl.disabled = busy;
+      scaleEl.disabled = busy;
+      maxDimEl.disabled = busy;
+      rescanBtn.disabled = busy || !currentPdf;
+      rescanPageNumEl.disabled = busy;
+    }
+
+    function setProgress(current, total, text) {
+      progEl.max = Math.max(total, 1);
+      progEl.value = Math.min(current, total);
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function clampNumber(value, { min, max, fallback }) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(Math.max(n, min), max);
+    }
+
+    function isRetriableStatus(status) {
+      return status === 408 || status === 409 || status === 425 || status === 429 || (status >= 500 && status <= 599);
+    }
+
+    function parseRetryAfterMs(retryAfterValue) {
+      if (!retryAfterValue) return null;
+      const seconds = Number(retryAfterValue);
+      if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+
+      const dateMs = Date.parse(retryAfterValue);
+      if (Number.isFinite(dateMs)) {
+        const delta = dateMs - Date.now();
+        return delta > 0 ? delta : 0;
+      }
+      return null;
+    }
+
+    function jitter(ms) {
+      const factor = 0.75 + Math.random() * 0.5;
+      return Math.round(ms * factor);
+    }
+
+    async function sleep(ms, signal) {
+      if (ms <= 0) return;
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        const onAbort = () => {
+          clearTimeout(t);
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        if (signal) signal.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+
+    function createTimeoutController({ timeoutMs, parentSignal }) {
+      const controller = new AbortController();
+
+      const onAbort = () => controller.abort(parentSignal?.reason ?? undefined);
+      if (parentSignal) {
+        if (parentSignal.aborted) controller.abort(parentSignal.reason ?? undefined);
+        else parentSignal.addEventListener("abort", onAbort, { once: true });
+      }
+
+      const t = setTimeout(() => controller.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+
+      return {
+        signal: controller.signal,
+        cleanup() {
+          clearTimeout(t);
+          if (parentSignal) parentSignal.removeEventListener("abort", onAbort);
+        }
+      };
+    }
+
+    async function fetchWithTimeoutAndRetry(url, fetchOptions, {
+      timeoutMs = 90_000,
+      maxRetries = 3,
+      baseDelayMs = 600,
+      maxDelayMs = 8_000,
+      signal,
+      onRetry
+    } = {}) {
+      let lastErr;
+
+      for (let attempt = 1; attempt <= (maxRetries + 1); attempt++) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+        const { signal: attemptSignal, cleanup } = createTimeoutController({ timeoutMs, parentSignal: signal });
+
+        try {
+          const res = await fetch(url, { ...fetchOptions, signal: attemptSignal });
+
+          if (res.ok) return res;
+
+          let detail = "";
+          try { detail = await res.text(); } catch {}
+
+          if (!isRetriableStatus(res.status) || attempt > maxRetries) {
+            throw new Error(
+              `LLM error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ""}`
+            );
+          }
+
+          const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+          const exp = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
+          const delayMs = jitter(retryAfterMs ?? exp);
+
+          onRetry?.({ attempt, maxRetries, status: res.status, reason: `HTTP ${res.status}`, delayMs });
+          await sleep(delayMs, signal);
+        } catch (err) {
+          if (err?.name === "AbortError") throw err;
+
+          const isTimeout = String(err?.message || "").toLowerCase().includes("timeout");
+          const isNetwork = err instanceof TypeError;
+
+          if (!(isTimeout || isNetwork) || attempt > maxRetries) throw err;
+
+          const exp = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
+          const delayMs = jitter(exp);
+
+          onRetry?.({ attempt, maxRetries, status: null, reason: isTimeout ? "timeout" : "network error", delayMs });
+          await sleep(delayMs, signal);
+          lastErr = err;
+        } finally {
+          cleanup();
+        }
+      }
+
+      throw lastErr ?? new Error("Request failed after retries.");
+    }
+
+    async function readPdfArrayBuffer() {
+      const file = pdfFileEl.files?.[0];
+      if (file) return await file.arrayBuffer();
+      throw new Error("Please choose a PDF file.");
+    }
+
+    async function loadPdfFromFile() {
+      try {
+        const pdfData = await readPdfArrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const pdf = await loadingTask.promise;
+
+        currentPdf = pdf;
+        currentTotalPages = pdf.numPages;
+
+        rescanBtn.disabled = false;
+        rescanPageNumEl.max = currentTotalPages;
+
+        log(`PDF loaded: ${currentTotalPages} page(s). Ready for scanning.`, "ok");
+      } catch (err) {
+        log(`Error loading PDF: ${err?.message ?? String(err)}`, "err");
+        currentPdf = null;
+        currentTotalPages = 0;
+        rescanBtn.disabled = true;
+      }
+    }
+
+    function downscaleToMaxDim(srcCanvas, maxDim) {
+      const w = srcCanvas.width, h = srcCanvas.height;
+      const maxSide = Math.max(w, h);
+      if (maxSide <= maxDim) return srcCanvas;
+
+      const ratio = maxDim / maxSide;
+      const tw = Math.max(1, Math.round(w * ratio));
+      const th = Math.max(1, Math.round(h * ratio));
+
+      const tmp = document.createElement("canvas");
+      tmp.width = tw;
+      tmp.height = th;
+
+      const tctx = tmp.getContext("2d", { alpha: false });
+      tctx.imageSmoothingEnabled = true;
+      tctx.imageSmoothingQuality = "high";
+      tctx.drawImage(srcCanvas, 0, 0, tw, th);
+      return tmp;
+    }
+
+    async function canvasToJpegDataUrl(c, quality = 0.9) {
+      return await new Promise((resolve, reject) => {
+        c.toBlob((blob) => {
+          if (!blob) return reject(new Error("Failed to encode image."));
+          const fr = new FileReader();
+          fr.onload = () => resolve(fr.result);
+          fr.onerror = () => reject(new Error("Failed to read image blob."));
+          fr.readAsDataURL(blob);
+        }, "image/jpeg", quality);
+      });
+    }
+
+    function trimEachLine(s) {
+      return String(s ?? "").replace(/^[^\S\r\n]+|[^\S\r\n]+$/gm, "");
+    }
+
+    // async function reviewPageMarkdownWithLLM({
+    //   apiKey,
+    //   model,
+    //   markdown,
+    //   signal,
+    //   timeoutMs = 120_000,
+    //   maxRetries = 3,
+    //   onRetry
+    // }) {
+    //     return markdown;
+
+    // //   const endpoint = "https://api.together.xyz/v1/chat/completions";
+
+    // //   const system = [
+    // //     "You are reviewing OCR output for ONE page of a scanned document.",
+    // //     "Correct OCR mistakes and formatting issues while preserving meaning.",
+    // //     "Fix Markdown structure: headings, lists, tables, spacing, punctuation, broken words.",
+    // //     "Do NOT invent text that is not present; do NOT add commentary.",
+    // //     "Remove headers, footers, page numbers, and obvious scanner artifacts.",
+    // //     "If uncertain, keep the original text.",
+    // //     "Output ONLY the final edited Markdown (no code fences, no extra text)."
+    // //   ].join(" ");
+
+    // //   const body = {
+    // //     model,
+    // //     temperature: 0,
+    // //     messages: [
+    // //       { role: "system", content: system },
+    // //       { role: "user", content: String(markdown ?? "") }
+    // //     ]
+    // //   };
+
+    // //   const res = await fetchWithTimeoutAndRetry(endpoint, {
+    // //     method: "POST",
+    // //     headers: {
+    // //       "Authorization": `Bearer ${apiKey}`,
+    // //       "Content-Type": "application/json"
+    // //     },
+    // //     body: JSON.stringify(body)
+    // //   }, { timeoutMs, maxRetries, signal, onRetry });
+
+    // //   const json = await res.json();
+    // //   const content = json?.choices?.[0]?.message?.content ?? "";
+    // //   return trimEachLine(content);
+    // }
+
+    async function transcribePageImageToMarkdown({
+      pageNum,
+      endpoint,
+      apiKey,
+      model,
+      dataUrl,
+      signal,
+      timeoutMs = 90_000,
+      maxRetries = 3,
+      onRetry
+    }) {
+      const system = [
+        "Transcribe this document page into Markdown. This page is part of a larger document.",
+        "Remove headers, footers, page numbers. Ignore images.",
+        "The first line may be a header. Do not transcribe headers!",
+        "The last line may be a footer. Do not transcribe footers!",
+        "Pay close attention to the capitalization of each word.",
+        "Some isolated lines or paragraphs may have an unusual capitalization, I want you to preserve that.", 
+        "Page numbers may be in the first or last row. Do not transcribe the page number!",
+        "Chapter titles should be rendered as first level Markdown headers (like '# Chapter One').",
+        "If a word is broken at a line end, remove the dash and put it back together.",
+        "If the page contains no text, return this string: '<!-- Empty page -->'.",
+        "Never generate markdown fences or any text that's not present in the document page."
+      ].join(" ");
+
+      const userText = `Here is page ${pageNum}:`;
+
+      const body = {
+        model,
+        temperature: 0.1,
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              { type: "image_url", image_url: { url: dataUrl } }
+            ]
+          }
+        ]
+      };
+
+      const res = await fetchWithTimeoutAndRetry(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      }, { timeoutMs, maxRetries, signal, onRetry });
+
+      const json = await res.json();
+      return json?.choices?.[0]?.message?.content ?? "";
+    }
+
+    function renderMarkdownPreview(mdText) {
+      const rawHtml = marked.parse(mdText || "", { breaks: true });
+      const cleanHtml = DOMPurify.sanitize(rawHtml, {
+        ALLOWED_TAGS: [
+          "a","p","br","strong","em","code","pre","blockquote",
+          "ul","ol","li","h1","h2","h3","h4","h5","h6","hr",
+          "table","thead","tbody","tr","th","td","span","div"
+        ],
+        ALLOWED_ATTR: ["href","title"]
+      });
+      mdPreviewEl.innerHTML = cleanHtml;
+    }
+
+    function findEmptyPages(mdText) {
+      const emptyPages = [];
+      const pageRegex = /<!-- Page (\d+) -->\s*([\s\S]*?)(?=<!-- Page \d+ -->|$)/g;
+      let match;
+
+      while ((match = pageRegex.exec(mdText)) !== null) {
+        const pageNum = parseInt(match[1], 10);
+        const content = match[2].trim();
+
+        // Check if the content is the empty page marker
+        if (content === '<!-- Empty page -->') {
+          emptyPages.push(pageNum);
+        }
+      }
+
+      return emptyPages;
+    }
+
+    function updateEmptyPagesDisplay() {
+      const mdText = outEl.value;
+      const emptyPages = findEmptyPages(mdText);
+
+      if (emptyPages.length === 0) {
+        emptyPagesSectionEl.style.display = "none";
+        return;
+      }
+
+      emptyPagesSectionEl.style.display = "block";
+      emptyPagesListEl.innerHTML = "";
+
+      emptyPages.forEach(pageNum => {
+        const badge = document.createElement("button");
+        badge.className = "page-badge";
+        badge.textContent = `${pageNum}`;
+        badge.title = `Click to Rescan page ${pageNum}`;
+        badge.addEventListener("click", () => {
+          rescanPageNumEl.value = pageNum;
+          rescanBtn.click();
+        });
+        emptyPagesListEl.appendChild(badge);
+      });
+    }
+
+    async function run() {
+      logEl.textContent = "";
+      dlLink.style.display = "none";
+      dlLink.href = "";
+
+      const apiKey = apiKeyEl.value.trim();
+      const endpoint = endpointEl.value.trim();
+      if (!endpointEl) throw new Error("Please enter an LLM endpoint.");
+
+      const model = modelEl.value;
+      const scale = clampNumber(scaleEl.value, { min: 0.5, max: 6, fallback: 2.0 });
+      const maxDim = clampNumber(maxDimEl.value, { min: 512, max: 4096, fallback: 1600 });
+
+      setBusy(true);
+      abortController = new AbortController();
+
+      try {
+        setProgress(0, 1, "Loading PDF...");
+        log("Loading PDF…");
+
+        const pdfData = await readPdfArrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+        const pdf = await loadingTask.promise;
+
+        // Store PDF for Rescan functionality
+        currentPdf = pdf;
+        currentTotalPages = pdf.numPages;
+
+        const totalPages = pdf.numPages;
+
+        setProgress(0, totalPages, `Loaded PDF. ${totalPages} page(s).`);
+        log(`Loaded PDF: ${totalPages} page(s).`, "ok");
+
+        // Enable Rescan button now that PDF is loaded
+        rescanPageNumEl.max = totalPages;
+
+        // Check for existing pages in the output
+        const existingOutput = outEl.value;
+        const existingPageSet = new Set();
+        const pageMarkerRegex = /<!-- Page (\d+) -->/g;
+        let match;
+        while ((match = pageMarkerRegex.exec(existingOutput)) !== null) {
+          existingPageSet.add(parseInt(match[1], 10));
+        }
+
+        // Determine which pages need to be OCR'd
+        const pagesToOcr = [];
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          if (!existingPageSet.has(pageNum)) {
+            pagesToOcr.push(pageNum);
+          }
+        }
+
+        if (pagesToOcr.length === 0) {
+          log("All pages already exist in the output. Nothing to OCR.", "ok");
+          setProgress(totalPages, totalPages, "Complete.");
+
+          // Still create download link for existing content
+          const final = outEl.value.trim() + "\n";
+          const blob = new Blob([final], { type: "text/markdown;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          dlLink.href = url;
+          dlLink.download = "output.md";
+          dlLink.style.display = "";
+
+          return;
+        }
+
+        log(`Found ${existingPageSet.size} existing page(s). Will OCR ${pagesToOcr.length} missing page(s).`, "ok");
+
+        // Progress starts at number of existing pages
+        let completedPages = existingPageSet.size;
+        setProgress(completedPages, totalPages, `Starting OCR: ${completedPages}/${totalPages} pages already done.`);
+
+        for (const pageNum of pagesToOcr) {
+          if (abortController.signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+          log(`\nPage ${pageNum}/${totalPages}: rendering…`);
+          setProgress(completedPages, totalPages, `Rendering page ${pageNum}/${totalPages}…`);
+
+          const page = await pdf.getPage(pageNum);
+          const viewport = page.getViewport({ scale });
+
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+
+          const uploadCanvas = downscaleToMaxDim(canvas, maxDim);
+
+          setProgress(completedPages, totalPages, `Encoding image ${pageNum}/${totalPages}…`);
+          const dataUrl = await canvasToJpegDataUrl(uploadCanvas, 0.9);
+
+          // ----- OCR step -----
+          setProgress(completedPages, totalPages, `OCR (page ${pageNum}/${totalPages})…`);
+          log(`Page ${pageNum}: OCR…`);
+
+          const mdRaw = await transcribePageImageToMarkdown({
+            pageNum,
+            endpoint,
+            apiKey,
+            model,
+            dataUrl,
+            signal: abortController.signal,
+            onRetry: ({ attempt, maxRetries, reason, delayMs, status }) => {
+              log(
+                `Page ${pageNum} OCR: retry ${attempt}/${maxRetries} (${reason}${status ? ` ${status}` : ""}) in ${Math.ceil(delayMs/1000)}s…`,
+                "warn"
+              );
+            }
+          });
+
+          const cleaned = trimEachLine((mdRaw || "").trim()) || " ";
+
+          // Insert the page into the output at the correct position
+          const currentOutput = outEl.value;
+          const pageMarkerStart = `<!-- Page ${pageNum} -->`;
+
+          if (!currentOutput.trim()) {
+            // Empty output - just insert the page
+            outEl.value = `\n${pageMarkerStart}\n${cleaned}\n`;
+          } else {
+            // Find where to insert this page
+            const pageMarkerRegex = /<!-- Page (\d+) -->/g;
+            const existingPages = [];
+            let m;
+            while ((m = pageMarkerRegex.exec(currentOutput)) !== null) {
+              existingPages.push({
+                num: parseInt(m[1], 10),
+                index: m.index
+              });
+            }
+
+            if (existingPages.length === 0) {
+              // No page markers at all - append
+              outEl.value = currentOutput + `\n${pageMarkerStart}\n${cleaned}\n`;
+            } else {
+              // Find the right position to insert
+              existingPages.sort((a, b) => a.num - b.num);
+
+              let insertIndex = -1;
+              for (let i = 0; i < existingPages.length; i++) {
+                if (pageNum < existingPages[i].num) {
+                  insertIndex = existingPages[i].index;
+                  break;
+                }
+              }
+
+              if (insertIndex === -1) {
+                // Insert after the last page
+                outEl.value = currentOutput + `\n${pageMarkerStart}\n${cleaned}\n`;
+              } else {
+                // Insert before the found page
+                const before = currentOutput.substring(0, insertIndex);
+                const after = currentOutput.substring(insertIndex);
+                outEl.value = before + `\n${pageMarkerStart}\n${cleaned}\n` + after;
+              }
+            }
+          }
+
+          completedPages++;
+          renderMarkdownPreview(outEl.value);
+          updateEmptyPagesDisplay();
+
+          log(`Page ${pageNum}: OCR done. (${cleaned.length} chars)`, "ok");
+          setProgress(completedPages, totalPages, `Done ${completedPages}/${totalPages}…`);
+        }
+
+        // Final cleanup and download link
+        const final = outEl.value.trim() + "\n";
+        outEl.value = final;
+        renderMarkdownPreview(final);
+        updateEmptyPagesDisplay();
+
+        const blob = new Blob([final], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        dlLink.href = url;
+        dlLink.download = "output.md";
+
+        log("\nOCR complete. Download is ready.", "ok");
+        setProgress(totalPages, totalPages, "Complete.");
+        dlLink.style.display = "";
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          log("\nAborted by user.", "warn");
+          setProgress(progEl.value, progEl.max, "Aborted.");
+
+          const partial = (outEl.value || "").trim() + "\n";
+          const blob = new Blob([partial], { type: "text/markdown;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          dlLink.href = url;
+          dlLink.download = "output.md";
+        } else {
+          log(`\nError: ${err?.message ?? String(err)}`, "err");
+          setProgress(progEl.value, progEl.max, "Error.");
+        }
+      } finally {
+        abortController = null;
+        setBusy(false);
+      }
+    }
+
+    async function rescanSinglePage() {
+      const pageNum = parseInt(rescanPageNumEl.value, 10);
+
+      if (!currentPdf) {
+        log("No PDF loaded. Please run OCR first.", "err");
+        return;
+      }
+
+      if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > currentTotalPages) {
+        log(`Invalid page number. Enter a number between 1 and ${currentTotalPages}.`, "err");
+        return;
+      }
+
+      const apiKey = apiKeyEl.value.trim();
+      const endpoint = endpointEl.value.trim();
+      if (!endpoint) {
+        log("Please enter an LLM endpoint.", "err");
+        return;
+      }
+
+      const model = modelEl.value;
+      const scale = clampNumber(scaleEl.value, { min: 0.5, max: 6, fallback: 2.0 });
+      const maxDim = clampNumber(maxDimEl.value, { min: 512, max: 4096, fallback: 1600 });
+
+      setBusy(true);
+      abortController = new AbortController();
+
+      try {
+        log(`\nRescaning page ${pageNum}…`);
+        setProgress(0, 1, `Rescaning page ${pageNum}…`);
+
+        // Render the page
+        const page = await currentPdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale });
+
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        const uploadCanvas = downscaleToMaxDim(canvas, maxDim);
+        const dataUrl = await canvasToJpegDataUrl(uploadCanvas, 0.9);
+
+        // OCR the page
+        const mdRaw = await transcribePageImageToMarkdown({
+          pageNum,
+          endpoint,
+          apiKey,
+          model,
+          dataUrl,
+          signal: abortController.signal,
+          onRetry: ({ attempt, maxRetries, reason, delayMs, status }) => {
+            log(
+              `Page ${pageNum} OCR: retry ${attempt}/${maxRetries} (${reason}${status ? ` ${status}` : ""}) in ${Math.ceil(delayMs/1000)}s…`,
+              "warn"
+            );
+          }
+        });
+
+        const cleaned = trimEachLine((mdRaw || "").trim()) || " ";
+
+        // Find and replace/insert the content for this page in the output
+        const currentOutput = outEl.value;
+        const pageMarkerStart = `<!-- Page ${pageNum} -->`;
+        const pageMarkerEnd = pageNum < currentTotalPages ? `<!-- Page ${pageNum + 1} -->` : null;
+
+        let newOutput;
+        const startIdx = currentOutput.indexOf(pageMarkerStart);
+
+        if (startIdx !== -1) {
+          // Page marker exists - replace the content
+          let endIdx;
+          if (pageMarkerEnd) {
+            endIdx = currentOutput.indexOf(pageMarkerEnd, startIdx);
+            if (endIdx === -1) endIdx = currentOutput.length;
+          } else {
+            endIdx = currentOutput.length;
+          }
+
+          const before = currentOutput.substring(0, startIdx);
+          const after = currentOutput.substring(endIdx);
+          const newContent = `${pageMarkerStart}\n${cleaned}${pageMarkerEnd ? '\n' : ''}`;
+          newOutput = before + newContent + after;
+
+          log(`Page ${pageNum}: Replaced existing content.`, "ok");
+        } else {
+          // Page marker doesn't exist - insert at appropriate position
+          if (!currentOutput.trim()) {
+            // Empty output - just insert the page
+            newOutput = `\n${pageMarkerStart}\n${cleaned}\n`;
+            log(`Page ${pageNum}: Inserted into empty output.`, "ok");
+          } else {
+            // Find where to insert this page
+            // Extract all existing page numbers
+            const pageMarkerRegex = /<!-- Page (\d+) -->/g;
+            const existingPages = [];
+            let match;
+            while ((match = pageMarkerRegex.exec(currentOutput)) !== null) {
+              existingPages.push({
+                num: parseInt(match[1], 10),
+                index: match.index
+              });
+            }
+
+            if (existingPages.length === 0) {
+              // No page markers at all - append
+              newOutput = currentOutput + `\n${pageMarkerStart}\n${cleaned}\n`;
+              log(`Page ${pageNum}: Appended to output.`, "ok");
+            } else {
+              // Find the right position to insert
+              existingPages.sort((a, b) => a.num - b.num);
+
+              let insertIndex = -1;
+              for (let i = 0; i < existingPages.length; i++) {
+                if (pageNum < existingPages[i].num) {
+                  insertIndex = existingPages[i].index;
+                  break;
+                }
+              }
+
+              if (insertIndex === -1) {
+                // Insert after the last page
+                newOutput = currentOutput + `\n${pageMarkerStart}\n${cleaned}\n`;
+                log(`Page ${pageNum}: Appended after page ${existingPages[existingPages.length - 1].num}.`, "ok");
+              } else {
+                // Insert before the found page
+                const before = currentOutput.substring(0, insertIndex);
+                const after = currentOutput.substring(insertIndex);
+                newOutput = before + `\n${pageMarkerStart}\n${cleaned}\n` + after;
+                log(`Page ${pageNum}: Inserted before page ${existingPages.find(p => p.index === insertIndex).num}.`, "ok");
+              }
+            }
+          }
+        }
+
+        outEl.value = newOutput;
+        renderMarkdownPreview(newOutput);
+        updateEmptyPagesDisplay();
+
+        // Update download link
+        const blob = new Blob([newOutput], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        if (dlLink.href) URL.revokeObjectURL(dlLink.href);
+        dlLink.href = url;
+        dlLink.download = "output.md";
+        dlLink.style.display = "";
+
+        log(`Page ${pageNum}: Rescan done. (${cleaned.length} chars)`, "ok");
+        setProgress(1, 1, "Rescan complete.");
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          log("\nAborted by user.", "warn");
+        } else {
+          log(`\nError: ${err?.message ?? String(err)}`, "err");
+        }
+      } finally {
+        abortController = null;
+        setBusy(false);
+      }
+    }
+
+    pdfFileEl.addEventListener("change", async () => {
+      if (pdfFileEl.files?.[0]) {
+        await loadPdfFromFile();
+      }
+    });
+
+    outEl.addEventListener("input", () => {
+      renderMarkdownPreview(outEl.value);
+      updateEmptyPagesDisplay();
+    });
+
+    startBtn.addEventListener("click", async () => {
+      try { await run(); }
+      catch (e) { log(`Error: ${e?.message ?? String(e)}`, "err"); }
+    });
+
+    abortBtn.addEventListener("click", () => {
+      if (abortController) abortController.abort();
+    });
+
+    rescanBtn.addEventListener("click", async () => {
+      try { await rescanSinglePage(); }
+      catch (e) { log(`Error: ${e?.message ?? String(e)}`, "err"); }
+    });
+
+    // Check if a PDF is already selected (e.g., from previous session) and load it
+    if (pdfFileEl.files?.[0]) {
+      loadPdfFromFile();
+    }
+
+    // Check if there's already content in the output and update empty pages display
+    if (outEl.value.trim()) {
+      updateEmptyPagesDisplay();
+      renderMarkdownPreview(outEl.value);
+    }
+
+    setProgress(0, 1, "Idle.");
+  </script>
+</body>
+</html>

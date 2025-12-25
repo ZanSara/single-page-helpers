@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Markdown → EPUB</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Markdown → EPUB</h1>
+
+  <div>
+    <label for="title">Book title (optional)</label>
+    <input id="title" placeholder="If empty, uses the first # heading" />
+  </div>
+
+  <div>
+    <label for="author">Author (optional)</label>
+    <input id="author" placeholder="Your name" />
+  </div>
+
+  <div>
+    <label for="frontImages">Front images (optional)</label>
+    <input id="frontImages" type="file" accept="image/*" multiple />
+    <div class="input-hint">
+      These images are inserted as full-page “cover” pages at the start of the EPUB. They're added in alphabetical order.
+    </div>
+  </div>
+
+  <div>
+    <label for="md">Markdown</label>
+    <textarea id="md" style="width: 100%;" rows=18 spellcheck="false" placeholder="# Chapter 1&#10;Write here..."></textarea>
+  </div>
+  
+  <button id="downloadBtn">Download EPUB</button>
+
+  <span id="status" class="status"></span>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <script>
+    const mdEl = document.getElementById("md");
+    const titleEl = document.getElementById("title");
+    const authorEl = document.getElementById("author");
+    const frontImagesEl = document.getElementById("frontImages"); // NEW
+    const downloadBtn = document.getElementById("downloadBtn");
+    const statusEl = document.getElementById("status");
+
+    downloadBtn.addEventListener("click", async () => {
+      status("");
+      downloadBtn.disabled = true;
+      try {
+        const frontImages = await readFrontImages(frontImagesEl?.files);
+
+        const blob = await markdownToEpub(mdEl.value, {
+          title: titleEl.value,
+          author: authorEl.value,
+          lang: "en",
+          frontImages, // NEW
+        });
+
+        const name = (safeFileName(titleEl.value || inferBookTitle(mdEl.value) || "book") || "book") + ".epub";
+        downloadBlob(blob, name);
+        status("EPUB generated.");
+      } catch (e) {
+        console.error(e);
+        status("Error: " + (e && e.message ? e.message : String(e)));
+      } finally {
+        downloadBtn.disabled = false;
+      }
+    });
+
+    function status(msg) { statusEl.textContent = msg; }
+
+    async function readFrontImages(fileList) {
+      // Sort by filename (case-insensitive), stable-ish tie-breaker by full name
+      const files = Array.from(fileList || [])
+        .filter(f => f && ((f.type || "").startsWith("image/")))
+        .sort((a, b) => {
+          const an = (a.name || "").toLocaleLowerCase();
+          const bn = (b.name || "").toLocaleLowerCase();
+          if (an < bn) return -1;
+          if (an > bn) return 1;
+          // tie-breaker (rare)
+          return (a.name || "").localeCompare(b.name || "");
+        });
+
+      if (!files.length) return [];
+
+      const out = [];
+      for (const f of files) {
+        const mediaType = (f.type || "").trim();
+        const buf = await f.arrayBuffer();
+        const ext = pickImageExt(f.name, mediaType);
+        out.push({
+          originalName: f.name || "image",
+          mediaType,
+          ext,
+          data: buf,
+        });
+      }
+      return out;
+    }
+
+    function pickImageExt(filename, mediaType) {
+      const byMime = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/gif": "gif",
+        "image/svg+xml": "svg",
+        "image/avif": "avif",
+      };
+      const fromMime = byMime[mediaType];
+      if (fromMime) return fromMime;
+
+      const m = String(filename || "").toLowerCase().match(/\.([a-z0-9]{1,5})$/);
+      return m ? m[1] : "img";
+    }
+
+    async function markdownToEpub(markdown, opts = {}) {
+      if (typeof JSZip === "undefined") throw new Error("JSZip missing.");
+      if (typeof marked === "undefined") throw new Error("marked missing.");
+
+      const md = String(markdown ?? "");
+      const lang = (opts.lang ?? "en").trim();
+      const author = (opts.author ?? "").trim();
+      const bookTitle = (opts.title ?? inferBookTitle(md) ?? "Untitled Book").trim();
+      const frontImages = Array.isArray(opts.frontImages) ? opts.frontImages : []; // NEW
+
+      const bookId = (opts.identifier ?? (crypto?.randomUUID?.() || `urn:uuid:${pseudoUuid()}`)).toString();
+      const modifiedIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+      const chapters = splitIntoChapters(md, { fallbackTitle: bookTitle, prefaceTitle: "Preface" });
+      if (!chapters.length) throw new Error("No content found.");
+
+      const zip = new JSZip();
+
+      // Must be first and uncompressed:
+      zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+
+      zip.file("META-INF/container.xml", `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`);
+
+      zip.file("OEBPS/styles/style.css", `
+body { font-family: serif; line-height: 1.45; }
+h1, h2, h3 { line-height: 1.2; }
+code, pre { font-family: monospace; }
+pre { white-space: pre-wrap; }
+img { max-width: 100%; height: auto; }
+.cover-page { page-break-after: always; }
+.cover-wrap { text-align: center; }
+.cover-wrap img { max-width: 100%; height: auto; }
+`.trim());
+
+      const manifestItems = [];
+      const spineItems = [];
+      const navItems = [];
+
+      // NEW: add front images + cover pages at start (not in TOC)
+      let coverImageId = null;
+      if (frontImages.length) {
+        frontImages.forEach((img, i) => {
+          const n = i + 1;
+
+          const imgId = `frontimg${n}`;
+          const imgHref = `images/front${n}.${img.ext}`;
+          const props = (i === 0) ? ` properties="cover-image"` : "";
+          if (i === 0) coverImageId = imgId;
+
+          zip.file(`OEBPS/${imgHref}`, img.data);
+
+          manifestItems.push(`<item id="${imgId}" href="${imgHref}" media-type="${xmlEscape(img.mediaType)}"${props}/>`);
+        });
+
+        frontImages.forEach((img, i) => {
+          const n = i + 1;
+          const pageId = `coverpage${n}`;
+          const pageHref = `text/cover${n}.xhtml`;
+          const imgHref = `../images/front${n}.${img.ext}`;
+
+          const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(lang)}" lang="${xmlEscape(lang)}">
+<head>
+  <meta charset="utf-8"/>
+  <title>${xmlEscape(bookTitle)} - Cover ${n}</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body class="cover-page">
+  <div class="cover-wrap">
+    <img src="${xmlEscape(imgHref)}" alt="Cover ${n}"/>
+  </div>
+</body>
+</html>`.trim();
+
+          zip.file(`OEBPS/${pageHref}`, xhtml);
+          manifestItems.push(`<item id="${pageId}" href="${pageHref}" media-type="application/xhtml+xml"/>`);
+          spineItems.push(`<itemref idref="${pageId}"/>`);
+        });
+      }
+
+      // Chapters
+      chapters.forEach((ch, i) => {
+        const idx = i + 1;
+        const id = `chap${idx}`;
+        const href = `text/chapter${idx}.xhtml`;
+
+        const bodyHtml = marked.parse(ch.markdown, { gfm: true });
+        const xhtml = wrapAsXhtml({ title: ch.title, lang, bodyHtml });
+
+        zip.file(`OEBPS/${href}`, xhtml);
+
+        manifestItems.push(`<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>`);
+        spineItems.push(`<itemref idref="${id}"/>`);
+        navItems.push({ title: ch.title, href });
+      });
+
+      zip.file("OEBPS/nav.xhtml", makeNavXhtml({ bookTitle, lang, navItems }));
+      zip.file("OEBPS/toc.ncx", makeTocNcx({ bookTitle, bookId, navItems }));
+      zip.file("OEBPS/content.opf", makeOpf({
+        bookTitle, author, lang, bookId, modifiedIso, manifestItems, spineItems, coverImageId
+      }));
+
+      return zip.generateAsync({ type: "blob" });
+    }
+
+    function splitIntoChapters(markdown, { fallbackTitle, prefaceTitle } = {}) {
+      const s = String(markdown ?? "").replace(/\r\n?/g, "\n");
+
+      // Top-level headings only: "# Title"
+      const headingRe = /^#\s+(.+?)\s*$/gm;
+      const headings = [];
+      let m;
+      while ((m = headingRe.exec(s)) !== null) {
+        headings.push({ title: m[1].trim(), index: m.index });
+      }
+
+      // No headings -> single chapter
+      if (!headings.length) {
+        const only = s.trim();
+        return only ? [{ title: fallbackTitle || "Chapter", markdown: only }] : [];
+      }
+
+      const out = [];
+
+      const pre = s.slice(0, headings[0].index).trim();
+      if (pre) out.push({ title: prefaceTitle || "Preface", markdown: pre });
+
+      for (let i = 0; i < headings.length; i++) {
+        const start = headings[i].index;
+        const end = i + 1 < headings.length ? headings[i + 1].index : s.length;
+        const chunk = s.slice(start, end);
+
+        const lines = chunk.split("\n");
+        lines.shift(); // drop "# Title"
+        const body = lines.join("\n").trim();
+
+        out.push({ title: headings[i].title, markdown: body || "" });
+      }
+
+      return out;
+    }
+
+    function inferBookTitle(markdown) {
+      const m = String(markdown ?? "").match(/^#\s+(.+?)\s*$/m);
+      return m ? m[1].trim() : null;
+    }
+
+    function wrapAsXhtml({ title, lang, bodyHtml }) {
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(lang)}" lang="${xmlEscape(lang)}">
+<head>
+  <meta charset="utf-8"/>
+  <title>${xmlEscape(title)}</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1>${xmlEscape(title)}</h1>
+  ${bodyHtml}
+</body>
+</html>`.trim();
+    }
+
+    function makeOpf({ bookTitle, author, lang, bookId, modifiedIso, manifestItems, spineItems, coverImageId }) {
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf"
+  unique-identifier="bookid"
+  version="3.0"
+  xml:lang="${xmlEscape(lang)}">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">${xmlEscape(bookId)}</dc:identifier>
+    <dc:title>${xmlEscape(bookTitle)}</dc:title>
+    ${author ? `<dc:creator>${xmlEscape(author)}</dc:creator>` : ""}
+    <dc:language>${xmlEscape(lang)}</dc:language>
+    <meta property="dcterms:modified">${xmlEscape(modifiedIso)}</meta>
+    ${coverImageId ? `<meta name="cover" content="${xmlEscape(coverImageId)}"/>` : ""}
+  </metadata>
+
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="css" href="styles/style.css" media-type="text/css"/>
+    ${manifestItems.join("\n    ")}
+  </manifest>
+
+  <spine toc="ncx">
+    ${spineItems.join("\n    ")}
+  </spine>
+</package>`.trim();
+    }
+
+    function makeNavXhtml({ bookTitle, lang, navItems }) {
+      const lis = navItems
+        .map(it => `<li><a href="${xmlEscape(it.href)}">${xmlEscape(it.title)}</a></li>`)
+        .join("\n      ");
+
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${xmlEscape(lang)}" lang="${xmlEscape(lang)}">
+<head>
+  <meta charset="utf-8"/>
+  <title>${xmlEscape(bookTitle)} - Table of Contents</title>
+</head>
+<body>
+  <nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops" id="toc">
+    <h1>Table of Contents</h1>
+    <ol>
+      ${lis}
+    </ol>
+  </nav>
+</body>
+</html>`.trim();
+    }
+
+    function makeTocNcx({ bookTitle, bookId, navItems }) {
+      const points = navItems.map((it, i) => `    <navPoint id="navPoint-${i + 1}" playOrder="${i + 1}">
+      <navLabel><text>${xmlEscape(it.title)}</text></navLabel>
+      <content src="${xmlEscape(it.href)}"/>
+    </navPoint>`).join("\n");
+
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN"
+  "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="${xmlEscape(bookId)}"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+  <docTitle><text>${xmlEscape(bookTitle)}</text></docTitle>
+  <navMap>
+${points}
+  </navMap>
+</ncx>`.trim();
+    }
+
+    function downloadBlob(blob, name) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function xmlEscape(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+    }
+
+    function safeFileName(s) {
+      return String(s)
+        .trim()
+        .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "")
+        .replace(/\s+/g, " ")
+        .slice(0, 80) || "book";
+    }
+
+    function pseudoUuid() {
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
+  </script>
+</body>
+</html>

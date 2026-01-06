@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>World Clock</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    :root{
+      --app-panel: #ffffff;
+      --app-border: #d6dde7;
+      --app-muted: #6b7280;
+      --app-text: #1f2a37;
+
+      --night:#001430;
+      --day:#194573;
+      --work:#4c83ab;
+
+      --cellW: 40px;
+      --cellH: 44px;
+      --radius: 10px;
+
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    body{
+      margin: 0;
+      max-width: none;
+      padding: 0;
+      gap: 0;
+      display: block;
+      /* color: var(--app-text);
+      background: var(--bg-color); */
+    }
+
+    header{
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      /* background: var(--bg-color); */
+      /* border-bottom: 1px solid var(--app-border); */
+    }
+
+    header h1{ border-bottom: 0; }
+
+    .wrap{
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 14px 16px;
+      background: transparent;
+    }
+
+    .top{
+      display:flex;
+      flex-direction: column;
+      align-items: center;
+      gap:12px;
+      text-align: center;
+      background: transparent;
+    }
+
+    .controls{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:center;
+      flex-wrap:wrap;
+      background: transparent;
+    }
+
+    /* Vanilla makes inputs/buttons full width; constrain them for this toolbar */
+    .controls input,
+    .controls select,
+    .controls button{
+      width: auto;
+      margin: 0;
+    }
+
+    input[type="text"]{ width: min(420px, 78vw); }
+
+    input[type="date"], input[type="text"], input[type="number"], select{
+      padding: 0.45rem 0.6rem;
+      /* border: 1px solid var(--app-border); */
+      /* background: var(--app-panel);
+      color: var(--app-text); */
+    }
+
+    button{
+      padding: 0.45rem 0.7rem;
+      /* border: 1px solid var(--app-border);
+      background: var(--app-panel);
+      color: var(--app-text); */
+      /* cursor: pointer; */
+    }
+    button:hover{ filter: brightness(0.98); }
+
+    .utcPick{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      background: transparent;
+    }
+    .utcPick label{
+      font-size: 0.9rem;
+      opacity: 0.85;
+      white-space: nowrap;
+      background: transparent;
+    }
+    .utcPick input[type="number"]{
+      width: 6ch;
+      font-family: var(--mono);
+    }
+
+    .legend{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+      font-size: 0.95rem;
+      color: var(--app-muted);
+      justify-content:center;
+      background: transparent;
+      margin-top: 8px;
+    }
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:99px;
+      display:inline-block;
+      border:1px solid rgba(0,0,0,.08);
+      margin-right:6px;
+      vertical-align:middle;
+      background: transparent; /* will be overridden by variants */
+    }
+    .dot.night{ background: var(--night); }
+    .dot.day{ background: var(--day); }
+    .dot.work{ background: var(--work); }
+
+    main .card{
+      /* background: var(--app-panel);
+      border: 1px solid var(--app-border);
+      border-radius: var(--radius); */
+      overflow: hidden;
+    }
+
+    .tableWrap{
+      overflow-x: auto;
+      background: transparent;
+    }
+
+    /* Override Vanilla’s table styling for grid layout */
+    table{
+      border: 0;
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      table-layout: fixed;
+      /* background: var(--app-panel); */
+    }
+
+    thead th{
+      position: sticky;
+      top: 68px; /* header height-ish */
+      z-index: 3;
+      /* background: #f7f9fc; */
+      /* border-bottom: 1px solid var(--app-border); */
+      font-size: 0.9rem;
+      /* color: var(--app-muted); */
+      height: 34px;
+      padding: 0;
+      text-align: center;
+      min-width: var(--cellW);
+      user-select: none;
+    }
+
+    thead th:first-child{
+      left: 0;
+      z-index: 5;
+      text-align: left;
+      padding-left: 12px;
+      width: 360px;
+      /* border-right: 1px solid var(--app-border); */
+      /* background: #f7f9fc; */
+    }
+
+    tbody td{
+      /* border-bottom: 1px solid var(--app-border); */
+      padding: 0;
+      min-width: var(--cellW);
+      text-align: center;
+      vertical-align: middle;
+      user-select: none;
+      /* background: var(--app-panel); */
+    }
+    tbody tr:last-child td{ border-bottom: 0; }
+
+    .rowHead{
+      /* background: var(--app-panel); */
+      /* border-right: 1px solid var(--app-border); */
+      width: 360px;
+      padding: 8px 12px;
+      text-align: left;
+    }
+
+    .zoneTop{
+      display: grid;
+      grid-template-columns: 30px auto 150px;
+      gap: 10px;
+      background: transparent;
+    }
+
+    .zoneName{
+      font-weight: 700;
+      font-size: 1.05rem;
+      line-height: 1.1;
+      background: transparent;
+    }
+
+    .zoneSub{
+      /* color: var(--app-muted); */
+      font-size: 0.9rem;
+      margin-top: 2px;
+      font-family: var(--mono);
+      background: transparent;
+    }
+
+    .nowBox{
+      text-align: right;
+      min-width: 120px;
+      background: transparent;
+    }
+    .nowTime{
+      font-family: var(--mono);
+      font-weight: 800;
+      font-size: 1rem;
+      background: transparent;
+    }
+    .nowDate{
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      color: var(--app-muted);
+      margin-top: 2px;
+      background: transparent;
+    }
+
+    .headTopRow{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      background: transparent;
+    }
+
+    .rmBtn{
+      height: 28px;
+      width: 28px;
+      padding: 0;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: bold;
+      line-height: 28px;
+      color: var(--primary-color);
+      border: 0px;
+      cursor: pointer;
+    }
+    .rmBtn:hover{ border: 0px; }
+
+    /* hour cells */
+    .hourRow td{ height: var(--cellH); }
+
+    .cell{
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      height: var(--cellH);
+      cursor: pointer;
+      border-left: 1px solid rgba(0,0,0,0.04);
+      overflow:hidden;
+      white-space:nowrap;
+      background: var(--app-panel); /* default */
+    }
+    .cell p{ margin: 0; background: transparent; }
+    .cell small{ font-size: 11px; background: transparent; }
+
+    .night{ background: var(--night);}
+    .day  { background: var(--day);}
+    .work { background: var(--work);}
+
+    /* column highlighting */
+    .selectedCol, .hoverCol{
+      font-weight: bold;
+      outline: 3px solid var(--link-color);
+      outline-offset: -3px;
+      color: var(--link-color);
+    }
+
+    /* Mobile: hide table cells (keep the row headers visible) */
+    @media (max-width: 700px){
+      :root{ --cellW: 34px; }
+      thead th{ top: 132px; } /* header is taller due to controls wrapping */
+      thead th:not(:first-child){ display:none; }
+      tbody td:not(.rowHead){ display:none; }
+      table{ table-layout:auto; }
+      .rowHead{ width:auto; }
+      thead th:first-child{ width:auto; }
+      .legend {display: none;}
+    }
+
+    @media (max-width: 900px){
+      thead th{ top: 132px; }
+      thead th:first-child, .rowHead{ width: 300px; }
+      :root{ --cellW: 34px; }
+      .cell{ font-size: 12px; }
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div class="wrap">
+    <div class="top">
+      <h1>World Clock</h1>
+
+      <div class="controls">
+        <input id="date" type="date" />
+
+        <!-- Always-available UTC picker -->
+        <div class="utcPick" title="Pick a UTC time to highlight that column">
+          <label for="utcTime">UTC</label>
+          <input id="utcHour" type="number" min="0" max="23" step="1" value="12" inputmode="numeric" />
+          <button id="utcClearBtn" type="button" title="Clear selection">Clear</button>
+        </div>
+
+        <input id="tzInput" type="text" list="tzList" placeholder="Place or timezone (e.g., Europe/Lisbon)" />
+        <datalist id="tzList"></datalist>
+        <button id="addBtn">Add</button>
+      </div>
+
+      <div class="legend">
+        <span><span class="dot night"></span>Night</span>
+        <span><span class="dot day"></span>Day</span>
+        <span><span class="dot work"></span>Work hours</span>
+        <span style="margin-left:8px;">(Work = 09–17, Night = 22–06)</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="card">
+    <div class="tableWrap">
+      <table id="grid">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+  
+  <footer>
+    <p>© 2023 - <script>document.write(new Date().getFullYear());</script> by <a href="https://zansara.dev"><img src="https://zansara.dev/me/avatar.svg" style="width: 1em; height: 1em; margin: 0 5px 0 0; display: inline;">Sara Zan</a> &CenterDot; <a href="https://github.com/ZanSara/single-page-helpers">GitHub</a> &CenterDot; <a href="https://zansara.dev/single-page-helpers">Home</a></p>
+  </footer>
+
+<script>
+(() => {
+  const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+  // Stored zones are "removable zones" only. UTC is always present and fixed first.
+  const DEFAULT_REMOVABLE_ZONES = [
+    (LOCAL_TZ !== "UTC" ? LOCAL_TZ : "Europe/London"),
+    "Europe/London",
+    "Europe/Lisbon",
+    "Europe/Rome",
+    "America/New_York",
+  ];
+
+  // Fallback list (used only if Intl.supportedValuesOf('timeZone') is unavailable)
+  const FALLBACK_COMMON_ZONES = [
+    "UTC",
+    "Europe/Lisbon","Europe/London","Europe/Dublin","Europe/Madrid","Europe/Paris","Europe/Berlin","Europe/Rome","Europe/Zurich","Europe/Warsaw","Europe/Athens",
+    "America/Los_Angeles","America/Denver","America/Chicago","America/New_York","America/Toronto","America/Sao_Paulo",
+    "Asia/Dubai","Asia/Kolkata","Asia/Singapore","Asia/Shanghai","Asia/Tokyo","Asia/Seoul",
+    "Australia/Sydney","Pacific/Auckland"
+  ];
+
+  // Optional shorthand aliases (not exhaustive; avoids table/layout changes and keeps storage canonical).
+  // Note: Many abbreviations are ambiguous globally; these are common expectations.
+  const TZ_ALIASES = Object.freeze({
+    "IST": "Asia/Kolkata",          // +05:30
+    "NPT": "Asia/Kathmandu",        // +05:45
+    "ACST": "Australia/Darwin",     // +09:30 (no DST)
+    "ACDT": "Australia/Adelaide",   // commonly used (DST varies)
+    "NST": "America/St_Johns",      // -03:30
+    "NFT": "Pacific/Norfolk",       // +11:00 (kept here as an example; not fractional)
+  });
+
+  const els = {
+    tzInput: document.getElementById("tzInput"),
+    tzList: document.getElementById("tzList"),
+    addBtn: document.getElementById("addBtn"),
+    date: document.getElementById("date"),
+    grid: document.getElementById("grid"),
+    thead: document.querySelector("#grid thead"),
+    tbody: document.querySelector("#grid tbody"),
+    utcHour: document.getElementById("utcHour"),
+    utcClearBtn: document.getElementById("utcClearBtn"),
+  };
+
+  function getAllSupportedTimeZones() {
+    try {
+      if (typeof Intl.supportedValuesOf === "function") {
+        const vals = Intl.supportedValuesOf("timeZone");
+        if (Array.isArray(vals) && vals.length) return vals;
+      }
+    } catch {}
+    return FALLBACK_COMMON_ZONES;
+  }
+
+  // Populate datalist with all supported IANA zones (best-effort).
+  for (const tz of getAllSupportedTimeZones()) {
+    const opt = document.createElement("option");
+    opt.value = tz;
+    els.tzList.appendChild(opt);
+  }
+  // Also include aliases as suggestions (so typing "IST" shows up).
+  for (const a of Object.keys(TZ_ALIASES)) {
+    const opt = document.createElement("option");
+    opt.value = a;
+    els.tzList.appendChild(opt);
+  }
+
+  // NOTE: storage contains removable zones only (UTC excluded)
+  const storageKey = "wtb_compact_zones_v4_mobile_hide_cells_with_utc_picker";
+  let removableZones = loadZones(); // excludes UTC by construction
+
+  // Display zones: UTC fixed first, then all removable zones (deduped, valid)
+  function displayZones() {
+    return ["UTC", ...removableZones.filter(z => z !== "UTC")];
+  }
+
+  // Column ordering (UTC hours 0..23 of the selected date)
+  let colOrder = Array.from({length:24}, (_, i) => i); // display index -> utcHour
+  // Interaction state uses DISPLAY index (after reordering)
+  let pinnedCol = null; // display index
+  let hoverCol  = null; // display index
+
+  // Default date: today (in local UI); interpreted as "that date in UTC" for the grid.
+  els.date.valueAsDate = new Date();
+
+  function pad2(n){ return String(n).padStart(2, "0"); }
+
+  function isValidTimeZone(tz) {
+    try { new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date()); return true; }
+    catch { return false; }
+  }
+
+  function normalizeTimeZone(input) {
+    const raw = String(input || "").trim();
+    if (!raw) return "";
+    // Accept aliases like "IST" -> "Asia/Kolkata"
+    const upper = raw.toUpperCase();
+    const alias = TZ_ALIASES[upper];
+    const candidate = alias || raw;
+    return candidate;
+  }
+
+  function uniqueValid(list) {
+    const out = [];
+    const seen = new Set();
+    for (const x of list) {
+      const tz = normalizeTimeZone(x);
+      if (!tz || seen.has(tz)) continue;
+      if (!isValidTimeZone(tz)) continue;
+      // never store UTC as removable
+      if (tz === "UTC") continue;
+      seen.add(tz);
+      out.push(tz);
+    }
+    return out;
+  }
+
+  function loadZones() {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return uniqueValid(DEFAULT_REMOVABLE_ZONES);
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return uniqueValid(DEFAULT_REMOVABLE_ZONES);
+      return uniqueValid(parsed.length ? parsed : DEFAULT_REMOVABLE_ZONES);
+    } catch {
+      return uniqueValid(DEFAULT_REMOVABLE_ZONES);
+    }
+  }
+
+  function saveZones() {
+    // Store only removable zones; UTC is always implicit
+    localStorage.setItem(storageKey, JSON.stringify(removableZones));
+  }
+
+  // UTC date start for the selected date: 00:00..24:00 UTC of that date
+  function baseUtcStart() {
+    const d = els.date.valueAsDate ? new Date(els.date.valueAsDate) : new Date();
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const day = d.getDate();
+    return new Date(Date.UTC(y, m, day, 0, 0, 0, 0));
+  }
+
+  function zonedParts(date, timeZone) {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit",
+      weekday:"short",
+      hour12:false
+    });
+    const parts = fmt.formatToParts(date);
+    const get = (t) => parts.find(p => p.type === t)?.value;
+    return {
+      year: get("year"),
+      month: get("month"),
+      day: get("day"),
+      weekday: get("weekday"),
+      hour: Number(get("hour")),
+      minute: Number(get("minute"))
+    };
+  }
+
+  // Fractional timezone support:
+  // - keep the 24-column layout
+  // - but if the local minute is not 00 at that UTC instant, display HH:MM in the cell.
+  // This covers +30/+45 (and rare other) offsets, and also handles DST transitions cleanly per cell.
+  function cellLabel(p) {
+    if (Number.isFinite(p.minute) && p.minute !== 0) return `${pad2(p.hour)}<br><small>${pad2(p.minute)}</small>`;
+    return String(p.hour);
+  }
+
+  function hourClass(localHour) {
+    if (localHour >= 9 && localHour <= 17) return "work";
+    if (localHour >= 22 || localHour <= 6) return "night";
+    return "day";
+  }
+
+  function addZoneFromInput() {
+    const input = els.tzInput.value.trim();
+    if (!input) return;
+
+    const tz = normalizeTimeZone(input);
+    if (!isValidTimeZone(tz)) {
+      alert(`Invalid timezone: "${input}". Try "Europe/Lisbon" or "America/New_York".`);
+      return;
+    }
+    if (tz === "UTC") {
+      // UTC is already fixed and always present; do nothing.
+      els.tzInput.value = "";
+      build();
+      return;
+    }
+    if (!removableZones.includes(tz)) {
+      removableZones.push(tz);
+      removableZones = uniqueValid(removableZones);
+      saveZones();
+    }
+    els.tzInput.value = "";
+    build();
+  }
+
+  function removeZone(tz) {
+    // UTC not removable (and not in removableZones anyway)
+    removableZones = removableZones.filter(z => z !== tz);
+    if (!removableZones.length) removableZones = uniqueValid(DEFAULT_REMOVABLE_ZONES);
+    saveZones();
+    build();
+  }
+
+  function previewCol() {
+    return pinnedCol !== null ? pinnedCol : hoverCol;
+  }
+
+  function applyColumnHighlight() {
+    const col = previewCol();
+
+    els.grid.querySelectorAll(".selectedCol, .hoverCol").forEach(el => {
+      el.classList.remove("selectedCol");
+      el.classList.remove("hoverCol");
+    });
+
+    if (col === null) return;
+
+    const cls = (pinnedCol !== null) ? "selectedCol" : "hoverCol";
+    els.grid.querySelectorAll(`[data-col="${col}"]`).forEach(el => el.classList.add(cls));
+  }
+
+  function updateRowHeads(baseUtc) {
+    const col = previewCol();
+    const utcHour = (col === null) ? 0 : colOrder[col];
+
+    for (const tz of displayZones()) {
+      const cell = els.tbody.querySelector(`.rowHead[data-tz="${cssEscape(tz)}"]`);
+      if (!cell) continue;
+
+      const timeEl = cell.querySelector(".nowTime");
+      const dateEl = cell.querySelector(".nowDate");
+      const subEl  = cell.querySelector(".zoneSub");
+
+      const d = new Date(baseUtc.getTime() + utcHour * 3600 * 1000);
+      const p = zonedParts(d, tz);
+
+      const timeStr = `${pad2(p.hour)}:${pad2(p.minute)}`;
+      const dateStr = `${p.weekday}, ${p.year}-${p.month}-${p.day}`;
+
+      if (timeEl) timeEl.textContent = timeStr;
+      if (dateEl) dateEl.textContent = dateStr;
+      if (subEl)  subEl.textContent  = `${tz === "UTC" ? "UTC" : "Local"}: ${timeStr}`;
+    }
+  }
+
+  // Safe selector escaping (CSS.escape polyfill-ish for common TZ strings)
+  function cssEscape(s) {
+    return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  // --- UTC picker -> highlight column ---
+  function clampHour(h) {
+    if (!Number.isFinite(h)) return 0;
+    return Math.max(0, Math.min(23, h));
+  }
+
+  function setPinnedFromUtcHour(utcHour) {
+    const h = clampHour(utcHour);
+    const displayIdx = colOrder.indexOf(h);
+    pinnedCol = (displayIdx >= 0) ? displayIdx : null;
+    hoverCol = null;
+    applyColumnHighlight();
+    updateRowHeads(baseUtcStart());
+  }
+
+  function getUtcHourFromPicker() {
+    const v = Number(els.utcHour.value);
+    if (!Number.isFinite(v)) return null;
+    return clampHour(Math.trunc(v));
+  }
+
+  function syncUtcInputToPinned() {
+    if (pinnedCol === null) return;
+    els.utcHour.value = String(colOrder[pinnedCol]);
+  }
+
+  function buildBody() {
+    els.tbody.innerHTML = "";
+    const baseUtc = baseUtcStart();
+
+    for (const tz of displayZones()) {
+      const makeRowHead = () => {
+        const head = document.createElement("td");
+        head.className = "rowHead";
+        head.dataset.tz = tz;
+
+        const top = document.createElement("div");
+        top.className = "zoneTop";
+
+        if (tz !== "UTC") {
+          const rm = document.createElement("button");
+          rm.className = "rmBtn";
+          rm.type = "button";
+          rm.textContent = "X";
+          rm.title = "Remove";
+          rm.addEventListener("click", () => removeZone(tz));
+          top.appendChild(rm); // LEFT
+        } else {
+          // spacer to keep alignment similar
+          const spacer = document.createElement("div");
+          spacer.style.width = "28px";
+          spacer.style.height = "28px";
+          top.appendChild(spacer);
+        }
+
+        const left = document.createElement("div");
+        const name = document.createElement("div");
+        name.className = "zoneName";
+        name.textContent = tz.split("/").pop();
+
+        const sub = document.createElement("div");
+        sub.className = "zoneSub";
+        sub.textContent = (tz === "UTC") ? "UTC: --:--" : "Local: --:--";
+        left.appendChild(name);
+        left.appendChild(sub);
+
+        const right = document.createElement("div");
+        right.className = "nowBox";
+
+        const headRow = document.createElement("div");
+        headRow.className = "headTopRow";
+
+        const timeWrap = document.createElement("div");
+        timeWrap.style.textAlign = "right";
+
+        const nowTime = document.createElement("div");
+        nowTime.className = "nowTime";
+        nowTime.textContent = "--:--";
+
+        const nowDate = document.createElement("div");
+        nowDate.className = "nowDate";
+        nowDate.textContent = "—";
+
+        timeWrap.appendChild(nowTime);
+        timeWrap.appendChild(nowDate);
+
+        headRow.appendChild(timeWrap); // RIGHT
+        right.appendChild(headRow);
+
+        top.appendChild(left);
+        top.appendChild(right);
+        head.appendChild(top);
+        return head;
+      };
+
+      const trHour = document.createElement("tr");
+      trHour.className = "hourRow";
+      trHour.appendChild(makeRowHead());
+
+      for (let displayIdx = 0; displayIdx < 24; displayIdx++) {
+        const utcHour = colOrder[displayIdx];
+
+        // Each column is a fixed UTC instant inside [00:00, 24:00) of selected UTC date
+        const instant = new Date(baseUtc.getTime() + utcHour * 3600 * 1000);
+        const p = zonedParts(instant, tz);
+
+        const td = document.createElement("td");
+        td.dataset.col = String(displayIdx);
+
+        const div = document.createElement("div");
+        div.className = "cell " + hourClass(p.hour);
+        div.innerHTML = "<p>" + cellLabel(p) + "</p>";
+
+        div.addEventListener("mouseenter", () => {
+          if (pinnedCol !== null) return;
+          hoverCol = displayIdx;
+          applyColumnHighlight();
+          updateRowHeads(baseUtc);
+        });
+        div.addEventListener("mouseleave", () => {
+          if (pinnedCol !== null) return;
+          hoverCol = null;
+          applyColumnHighlight();
+          updateRowHeads(baseUtc);
+        });
+        div.addEventListener("click", () => {
+          pinnedCol = (pinnedCol === displayIdx) ? null : displayIdx;
+          hoverCol = null;
+          applyColumnHighlight();
+          updateRowHeads(baseUtc);
+          syncUtcInputToPinned();
+        });
+
+        td.appendChild(div);
+        trHour.appendChild(td);
+      }
+
+      els.tbody.appendChild(trHour);
+    }
+
+    applyColumnHighlight();
+    updateRowHeads(baseUtc);
+    syncUtcInputToPinned();
+  }
+
+  function build() {
+    buildBody();
+  }
+
+  // events
+  els.addBtn.addEventListener("click", addZoneFromInput);
+  els.tzInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addZoneFromInput();
+  });
+
+  els.date.addEventListener("change", () => {
+    pinnedCol = null;
+    hoverCol = null;
+    // keep utc input as-is; it still maps to same hour number
+    const h = getUtcHourFromPicker();
+    if (h !== null) setPinnedFromUtcHour(h);
+    build();
+  });
+
+  // UTC picker events (works on every screen size)
+  els.utcHour.addEventListener("input", () => {
+    const h = getUtcHourFromPicker();
+    if (h === null) return;
+    setPinnedFromUtcHour(h);
+  });
+
+  els.utcClearBtn.addEventListener("click", () => {
+    pinnedCol = null;
+    hoverCol = null;
+    applyColumnHighlight();
+    updateRowHeads(baseUtcStart());
+  });
+
+  // init: pick a sensible initial highlight = current UTC hour
+  (function initUtcPicker() {
+    const now = new Date();
+    const utcH = now.getUTCHours();
+    els.utcHour.value = String(utcH);
+    setPinnedFromUtcHour(utcH);
+  })();
+
+  build();
+})();
+</script>
+</body>
+</html>

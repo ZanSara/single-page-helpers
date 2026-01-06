@@ -113,7 +113,7 @@
   </style>
 </head>
 <body>
-  <h2>Scanned PDF → Markdown</h2>
+  <h1>Scanned PDF → Markdown</h1>
 
   <div>
     <label>PDF file</label>
@@ -224,6 +224,11 @@
   </div>
 
   <a id="download" download="output.md">Download Markdown</a>
+
+  
+  <footer>
+    <p>© 2023 - <script>document.write(new Date().getFullYear());</script> by <a href="https://zansara.dev"><img src="https://zansara.dev/me/avatar.svg" style="width: 1em; height: 1em; margin: 0 5px 0 0; display: inline;">Sara Zan</a> &CenterDot; <a href="https://github.com/ZanSara/single-page-helpers">GitHub</a> &CenterDot; <a href="https://zansara.dev/single-page-helpers">Home</a></p>
+  </footer>
 
   <script type="module">
     import { marked } from "https://cdn.jsdelivr.net/npm/marked@13.0.2/+esm";
@@ -493,52 +498,6 @@
     function trimEachLine(s) {
       return String(s ?? "").replace(/^[^\S\r\n]+|[^\S\r\n]+$/gm, "");
     }
-
-    // async function reviewPageMarkdownWithLLM({
-    //   apiKey,
-    //   model,
-    //   markdown,
-    //   signal,
-    //   timeoutMs = 120_000,
-    //   maxRetries = 3,
-    //   onRetry
-    // }) {
-    //     return markdown;
-
-    // //   const endpoint = "https://api.together.xyz/v1/chat/completions";
-
-    // //   const system = [
-    // //     "You are reviewing Scan output for ONE page of a scanned document.",
-    // //     "Correct Scan mistakes and formatting issues while preserving meaning.",
-    // //     "Fix Markdown structure: headings, lists, tables, spacing, punctuation, broken words.",
-    // //     "Do NOT invent text that is not present; do NOT add commentary.",
-    // //     "Remove headers, footers, page numbers, and obvious scanner artifacts.",
-    // //     "If uncertain, keep the original text.",
-    // //     "Output ONLY the final edited Markdown (no code fences, no extra text)."
-    // //   ].join(" ");
-
-    // //   const body = {
-    // //     model,
-    // //     temperature: 0,
-    // //     messages: [
-    // //       { role: "system", content: system },
-    // //       { role: "user", content: String(markdown ?? "") }
-    // //     ]
-    // //   };
-
-    // //   const res = await fetchWithTimeoutAndRetry(endpoint, {
-    // //     method: "POST",
-    // //     headers: {
-    // //       "Authorization": `Bearer ${apiKey}`,
-    // //       "Content-Type": "application/json"
-    // //     },
-    // //     body: JSON.stringify(body)
-    // //   }, { timeoutMs, maxRetries, signal, onRetry });
-
-    // //   const json = await res.json();
-    // //   const content = json?.choices?.[0]?.message?.content ?? "";
-    // //   return trimEachLine(content);
-    // }
 
     async function transcribePageImageToMarkdown({
       pageNum,

@@ -75,7 +75,7 @@
       margin: 0;
     }
 
-    input[type="text"]{ width: min(420px, 78vw); }
+    input[type="text"], select#tzInput{ width: min(420px, 78vw); }
 
     input[type="date"], input[type="text"], input[type="number"], select{
       padding: 0.45rem 0.6rem;
@@ -333,8 +333,9 @@
           <button id="utcClearBtn" type="button" title="Clear selection">Clear</button>
         </div>
 
-        <input id="tzInput" type="text" list="tzList" placeholder="Place or timezone (e.g., Europe/Lisbon)" />
-        <datalist id="tzList"></datalist>
+        <select id="tzInput">
+          <option value="">Select a timezone...</option>
+        </select>
         <button id="addBtn">Add</button>
       </div>
 
@@ -398,7 +399,6 @@
 
   const els = {
     tzInput: document.getElementById("tzInput"),
-    tzList: document.getElementById("tzList"),
     addBtn: document.getElementById("addBtn"),
     date: document.getElementById("date"),
     grid: document.getElementById("grid"),
@@ -418,17 +418,19 @@
     return FALLBACK_COMMON_ZONES;
   }
 
-  // Populate datalist with all supported IANA zones (best-effort).
+  // Populate dropdown with all supported IANA zones (best-effort).
   for (const tz of getAllSupportedTimeZones()) {
     const opt = document.createElement("option");
     opt.value = tz;
-    els.tzList.appendChild(opt);
+    opt.textContent = tz;
+    els.tzInput.appendChild(opt);
   }
-  // Also include aliases as suggestions (so typing "IST" shows up).
+  // Also include aliases as options.
   for (const a of Object.keys(TZ_ALIASES)) {
     const opt = document.createElement("option");
     opt.value = a;
-    els.tzList.appendChild(opt);
+    opt.textContent = `${a} (${TZ_ALIASES[a]})`;
+    els.tzInput.appendChild(opt);
   }
 
   // NOTE: storage contains removable zones only (UTC excluded)
@@ -553,7 +555,7 @@
     }
     if (tz === "UTC") {
       // UTC is already fixed and always present; do nothing.
-      els.tzInput.value = "";
+      els.tzInput.selectedIndex = 0; // Reset to default option
       build();
       return;
     }
@@ -562,7 +564,7 @@
       removableZones = uniqueValid(removableZones);
       saveZones();
     }
-    els.tzInput.value = "";
+    els.tzInput.selectedIndex = 0; // Reset to default option
     build();
   }
 
@@ -772,9 +774,7 @@
 
   // events
   els.addBtn.addEventListener("click", addZoneFromInput);
-  els.tzInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") addZoneFromInput();
-  });
+  els.tzInput.addEventListener("change", addZoneFromInput);
 
   els.date.addEventListener("change", () => {
     pinnedCol = null;

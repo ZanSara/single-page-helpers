@@ -153,10 +153,15 @@ input, textarea, select {
     width: 100%;
     color: var(--text-color); 
 }
-input:focus, input:active { 
-    border-color: var(--link-color); 
-    color: var(--text-color); 
-    background-color: var(--bg-color); 
+input:focus, input:active {
+    border-color: var(--link-color);
+    color: var(--text-color);
+    background-color: var(--bg-color);
+}
+input[type="color"] {
+    height: 3.5rem;
+    padding: 0.3rem;
+    cursor: pointer;
 }
 
 button, .button {

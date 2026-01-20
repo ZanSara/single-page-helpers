@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css">
+  <script data-goatcounter="https://zansaradev.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+  <title>Code Image Generator</title>
+
+  <!-- CodeMirror -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/dracula.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/monokai.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/seti.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/material.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/nord.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/oceanic-next.min.css">
+
+  <style>
+    /* Only styles specific to this tool */
+    #export-area {
+      padding: 32px;
+      border-radius: 8px;
+      margin: 1rem 0;
+    }
+
+    .window {
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 20px 68px rgba(0,0,0,0.55);
+    }
+
+    .window-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.3);
+    }
+
+    .window-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: transparent;
+    }
+
+    .window-dot.red { background: #ff5f56; }
+    .window-dot.yellow { background: #ffbd2e; }
+    .window-dot.green { background: #27c93f; }
+
+    .window.no-header .window-header { display: none; }
+    .window.no-header .CodeMirror { border-radius: 8px; }
+
+    .window.no-shadow { box-shadow: none; }
+
+    .CodeMirror {
+      height: auto;
+      min-height: 150px;
+      font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 16px;
+      background: transparent;
+    }
+
+    .CodeMirror-scroll { min-height: 150px; }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: end;
+    }
+
+    .controls > div {
+      flex: 1;
+      min-width: 100px;
+    }
+
+    .controls input, .controls select {
+      margin: 0;
+    }
+
+    .checkbox-row {
+      display: flex;
+      gap: 1rem;
+      margin: 0.5rem 0;
+    }
+
+    .checkbox-row label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .checkbox-row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+
+    .button-row button {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <h1>Code Image Generator</h1>
+
+  <div class="controls">
+    <div>
+      <label for="theme">Theme:</label>
+      <select id="theme">
+        <option value="monokai">Monokai</option>
+        <option value="dracula">Dracula</option>
+        <option value="seti" selected>Seti</option>
+        <option value="material">Material</option>
+        <option value="nord">Nord</option>
+        <option value="oceanic-next">Oceanic Next</option>
+      </select>
+    </div>
+
+    <div>
+      <label for="language">Language:</label>
+      <select id="language">
+        <option value="python">Python</option>
+        <option value="javascript">JavaScript</option>
+        <option value="htmlmixed">HTML</option>
+        <option value="css">CSS</option>
+        <option value="clike">C/C++/Java</option>
+        <option value="go">Go</option>
+        <option value="rust">Rust</option>
+        <option value="sql">SQL</option>
+        <option value="markdown">Markdown</option>
+        <option value="shell">Shell</option>
+      </select>
+    </div>
+
+    <div>
+      <label for="bgColor">Background:</label>
+      <input type="color" id="bgColor" value="#abb8c3">
+    </div>
+
+    <div>
+      <label for="padding">Padding (px):</label>
+      <input type="number" id="padding" value="32" min="0" max="128" step="8">
+    </div>
+
+    <div>
+      <label for="fontSize">Font size:</label>
+      <input type="number" id="fontSize" value="14" min="10" max="24" step="1">
+    </div>
+  </div>
+
+  <div class="checkbox-row">
+    <label>
+      <input type="checkbox" id="showHeader" checked>
+      Window controls
+    </label>
+    <label>
+      <input type="checkbox" id="showLineNumbers" checked>
+      Line numbers
+    </label>
+    <label>
+      <input type="checkbox" id="showShadow" checked>
+      Drop shadow
+    </label>
+  </div>
+
+  <div class="button-row">
+    <button id="exportPng">Export PNG</button>
+    <button id="copyClipboard">Copy to Clipboard</button>
+  </div>
+
+  <div id="export-area">
+    <div class="window" id="codeWindow">
+      <div class="window-header">
+        <div class="window-dot red"></div>
+        <div class="window-dot yellow"></div>
+        <div class="window-dot green"></div>
+      </div>
+      <textarea id="code">function createImage(code) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // Draw beautiful code image
+  ctx.fillStyle = '#282a36';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  return canvas.toDataURL('image/png');
+}</textarea>
+    </div>
+  </div>
+
+  <p class="input-hint">Tip: Drag and drop a file onto the page to load it.</p>
+
+  <footer>
+    <p>&copy; 2023 - <script>document.write(new Date().getFullYear());</script> by <a href="https://zansara.dev"><img src="https://zansara.dev/assets/avatar/avatar.svg" style="width: 1em; height: 1em; margin: 0 5px 0 0; display: inline;">Sara Zan</a> &CenterDot; <a href="https://github.com/ZanSara/single-page-helpers">GitHub</a> &CenterDot; <a href="https://zansara.dev/single-page-helpers">Home</a></p>
+  </footer>
+
+  <!-- CodeMirror -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/python/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/css/css.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/clike/clike.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/go/go.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/rust/rust.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/sql/sql.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/shell/shell.min.js"></script>
+
+  <!-- html2canvas for export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <script>
+    (function() {
+      // Initialize CodeMirror
+      var textarea = document.getElementById('code');
+      var editor = CodeMirror.fromTextArea(textarea, {
+        mode: 'javascript',
+        theme: 'seti',
+        lineNumbers: true,
+        lineWrapping: true,
+        viewportMargin: Infinity
+      });
+
+      // Elements
+      var themeSelect = document.getElementById('theme');
+      var languageSelect = document.getElementById('language');
+      var bgColorInput = document.getElementById('bgColor');
+      var paddingInput = document.getElementById('padding');
+      var fontSizeInput = document.getElementById('fontSize');
+      var showHeaderCheckbox = document.getElementById('showHeader');
+      var showLineNumbersCheckbox = document.getElementById('showLineNumbers');
+      var showShadowCheckbox = document.getElementById('showShadow');
+      var exportBtn = document.getElementById('exportPng');
+      var copyBtn = document.getElementById('copyClipboard');
+      var exportArea = document.getElementById('export-area');
+      var codeWindow = document.getElementById('codeWindow');
+
+      // Set initial background
+      exportArea.style.background = bgColorInput.value;
+
+      // Theme change
+      themeSelect.addEventListener('change', function(e) {
+        editor.setOption('theme', e.target.value);
+      });
+
+      // Language change
+      languageSelect.addEventListener('change', function(e) {
+        editor.setOption('mode', e.target.value);
+      });
+
+      // Background color change
+      bgColorInput.addEventListener('input', function(e) {
+        exportArea.style.background = e.target.value;
+      });
+
+      // Padding change
+      paddingInput.addEventListener('input', function(e) {
+        exportArea.style.padding = e.target.value + 'px';
+      });
+
+      // Font size change
+      fontSizeInput.addEventListener('input', function(e) {
+        document.querySelector('.CodeMirror').style.fontSize = e.target.value + 'px';
+        editor.refresh();
+      });
+
+      // Show/hide window header
+      showHeaderCheckbox.addEventListener('change', function(e) {
+        codeWindow.classList.toggle('no-header', !e.target.checked);
+      });
+
+      // Show/hide line numbers
+      showLineNumbersCheckbox.addEventListener('change', function(e) {
+        editor.setOption('lineNumbers', e.target.checked);
+      });
+
+      // Show/hide drop shadow
+      showShadowCheckbox.addEventListener('change', function(e) {
+        codeWindow.classList.toggle('no-shadow', !e.target.checked);
+      });
+
+      // Export PNG
+      exportBtn.addEventListener('click', function() {
+        exportBtn.textContent = 'Exporting...';
+        exportBtn.disabled = true;
+
+        html2canvas(exportArea, {
+          backgroundColor: null,
+          scale: 2,
+          useCORS: true
+        }).then(function(canvas) {
+          var link = document.createElement('a');
+          link.download = 'code.png';
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+          exportBtn.textContent = 'Export PNG';
+          exportBtn.disabled = false;
+        }).catch(function(err) {
+          console.error('Export failed:', err);
+          exportBtn.textContent = 'Export PNG';
+          exportBtn.disabled = false;
+          alert('Export failed. Please try again.');
+        });
+      });
+
+      // Copy to clipboard
+      copyBtn.addEventListener('click', function() {
+        copyBtn.textContent = 'Copying...';
+        copyBtn.disabled = true;
+
+        html2canvas(exportArea, {
+          backgroundColor: null,
+          scale: 2,
+          useCORS: true
+        }).then(function(canvas) {
+          canvas.toBlob(function(blob) {
+            navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]).then(function() {
+              copyBtn.textContent = 'Copied!';
+              setTimeout(function() {
+                copyBtn.textContent = 'Copy to Clipboard';
+                copyBtn.disabled = false;
+              }, 2000);
+            }).catch(function(err) {
+              console.error('Copy failed:', err);
+              copyBtn.textContent = 'Copy to Clipboard';
+              copyBtn.disabled = false;
+              alert('Copy failed. Your browser may not support clipboard API.');
+            });
+          }, 'image/png');
+        }).catch(function(err) {
+          console.error('Copy failed:', err);
+          copyBtn.textContent = 'Copy to Clipboard';
+          copyBtn.disabled = false;
+        });
+      });
+
+      // Handle drag and drop
+      document.body.addEventListener('dragover', function(e) {
+        e.preventDefault();
+      });
+
+      document.body.addEventListener('drop', function(e) {
+        e.preventDefault();
+        var file = e.dataTransfer.files[0];
+        if (file) {
+          var reader = new FileReader();
+          reader.onload = function(event) {
+            editor.setValue(event.target.result);
+
+            // Try to detect language from file extension
+            var ext = file.name.split('.').pop().toLowerCase();
+            var langMap = {
+              'js': 'javascript',
+              'ts': 'javascript',
+              'py': 'python',
+              'html': 'htmlmixed',
+              'htm': 'htmlmixed',
+              'css': 'css',
+              'c': 'clike',
+              'cpp': 'clike',
+              'h': 'clike',
+              'java': 'clike',
+              'go': 'go',
+              'rs': 'rust',
+              'sql': 'sql',
+              'md': 'markdown',
+              'sh': 'shell',
+              'bash': 'shell'
+            };
+
+            if (langMap[ext]) {
+              languageSelect.value = langMap[ext];
+              editor.setOption('mode', langMap[ext]);
+            }
+          };
+          reader.readAsText(file);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

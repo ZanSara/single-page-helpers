@@ -37,7 +37,6 @@
     .window {
       border-radius: 8px;
       overflow: hidden;
-      box-shadow: 0 20px 68px rgba(0,0,0,0.55);
     }
 
     .window-header {
@@ -62,7 +61,9 @@
     .window.no-header .window-header { display: none; }
     .window.no-header .CodeMirror { border-radius: 8px; }
 
-    .window.no-shadow { box-shadow: none; }
+    input[type="range"] {
+      cursor: pointer;
+    }
 
     .CodeMirror {
       height: auto;
@@ -186,10 +187,25 @@
       <input type="checkbox" id="showLineNumbers" checked>
       Line numbers
     </label>
-    <label>
-      <input type="checkbox" id="showShadow" checked>
-      Drop shadow
-    </label>
+  </div>
+
+  <div class="controls">
+    <div>
+      <label for="shadowBlur">Shadow blur:</label>
+      <input type="range" id="shadowBlur" value="68" min="0" max="100" step="1">
+    </div>
+    <div>
+      <label for="shadowOffsetX">Offset X:</label>
+      <input type="range" id="shadowOffsetX" value="0" min="-50" max="50" step="1">
+    </div>
+    <div>
+      <label for="shadowOffsetY">Offset Y:</label>
+      <input type="range" id="shadowOffsetY" value="20" min="-50" max="50" step="1">
+    </div>
+    <div>
+      <label for="shadowOpacity">Shadow opacity:</label>
+      <input type="range" id="shadowOpacity" value="55" min="0" max="100" step="1">
+    </div>
   </div>
 
   <div class="button-row">
@@ -258,7 +274,10 @@
       var fontSizeInput = document.getElementById('fontSize');
       var showHeaderCheckbox = document.getElementById('showHeader');
       var showLineNumbersCheckbox = document.getElementById('showLineNumbers');
-      var showShadowCheckbox = document.getElementById('showShadow');
+      var shadowBlurInput = document.getElementById('shadowBlur');
+      var shadowOffsetXInput = document.getElementById('shadowOffsetX');
+      var shadowOffsetYInput = document.getElementById('shadowOffsetY');
+      var shadowOpacityInput = document.getElementById('shadowOpacity');
       var exportBtn = document.getElementById('exportPng');
       var copyBtn = document.getElementById('copyClipboard');
       var exportArea = document.getElementById('export-area');
@@ -292,8 +311,17 @@
         codeWindow.style.background = bg;
       }
 
+      function updateShadow() {
+        var blur = shadowBlurInput.value;
+        var offsetX = shadowOffsetXInput.value;
+        var offsetY = shadowOffsetYInput.value;
+        var opacity = shadowOpacityInput.value / 100;
+        codeWindow.style.boxShadow = offsetX + 'px ' + offsetY + 'px ' + blur + 'px rgba(0,0,0,' + opacity + ')';
+      }
+
       // Set initial code background and refresh editor
       updateCodeBackground(themeSelect.value);
+      updateShadow();
       editor.refresh();
 
       // Theme change
@@ -333,10 +361,11 @@
         editor.setOption('lineNumbers', e.target.checked);
       });
 
-      // Show/hide drop shadow
-      showShadowCheckbox.addEventListener('change', function(e) {
-        codeWindow.classList.toggle('no-shadow', !e.target.checked);
-      });
+      // Shadow controls
+      shadowBlurInput.addEventListener('input', updateShadow);
+      shadowOffsetXInput.addEventListener('input', updateShadow);
+      shadowOffsetYInput.addEventListener('input', updateShadow);
+      shadowOpacityInput.addEventListener('input', updateShadow);
 
       // Export PNG
       exportBtn.addEventListener('click', function() {

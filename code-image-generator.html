@@ -9,12 +9,22 @@
 
   <!-- CodeMirror -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/ayu-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/ayu-mirage.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/base16-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/cobalt.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/dracula.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/monokai.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/seti.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/gruvbox-dark.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/hopscotch.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/material.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/material-darker.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/monokai.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/nord.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/oceanic-next.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/seti.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/tomorrow-night-eighties.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/twilight.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/theme/zenburn.min.css">
 
   <style>
     /* Only styles specific to this tool */
@@ -116,12 +126,22 @@
     <div>
       <label for="theme">Theme:</label>
       <select id="theme">
-        <option value="monokai">Monokai</option>
+        <option value="ayu-dark">Ayu Dark</option>
+        <option value="ayu-mirage">Ayu Mirage</option>
+        <option value="base16-dark">Base16 Dark</option>
+        <option value="cobalt">Cobalt</option>
         <option value="dracula">Dracula</option>
-        <option value="seti" selected>Seti</option>
+        <option value="gruvbox-dark">Gruvbox Dark</option>
+        <option value="hopscotch">Hopscotch</option>
         <option value="material">Material</option>
+        <option value="material-darker">Material Darker</option>
+        <option value="monokai" selected>Monokai</option>
         <option value="nord">Nord</option>
         <option value="oceanic-next">Oceanic Next</option>
+        <option value="seti">Seti</option>
+        <option value="tomorrow-night-eighties">Tomorrow Night Eighties</option>
+        <option value="twilight">Twilight</option>
+        <option value="zenburn">Zenburn</option>
       </select>
     </div>
 
@@ -249,12 +269,22 @@
 
       // Theme background colors
       var themeBackgrounds = {
-        'monokai': '#272822',
+        'ayu-dark': '#0a0e14',
+        'ayu-mirage': '#1f2430',
+        'base16-dark': '#151515',
+        'cobalt': '#002240',
         'dracula': '#282a36',
-        'seti': '#151718',
+        'gruvbox-dark': '#282828',
+        'hopscotch': '#322931',
         'material': '#263238',
+        'material-darker': '#212121',
+        'monokai': '#272822',
         'nord': '#2e3440',
-        'oceanic-next': '#1b2b34'
+        'oceanic-next': '#1b2b34',
+        'seti': '#151718',
+        'tomorrow-night-eighties': '#2d2d2d',
+        'twilight': '#141414',
+        'zenburn': '#3f3f3f'
       };
 
       function updateCodeBackground(theme) {

@@ -65,6 +65,24 @@
       cursor: pointer;
     }
 
+    .custom-theme-row {
+      flex-basis: 100%;
+    }
+
+    .custom-theme-input {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .custom-theme-input input {
+      flex: 1;
+    }
+
+    .custom-theme-input button {
+      margin: 0;
+      white-space: nowrap;
+    }
+
     .CodeMirror {
       height: auto;
       min-height: 150px;
@@ -143,6 +161,7 @@
         <option value="tomorrow-night-eighties">Tomorrow Night Eighties</option>
         <option value="twilight">Twilight</option>
         <option value="zenburn">Zenburn</option>
+        <option value="custom">Custom...</option>
       </select>
     </div>
 
@@ -175,6 +194,14 @@
     <div>
       <label for="fontSize">Font size:</label>
       <input type="number" id="fontSize" value="14" min="10" max="24" step="1">
+    </div>
+  </div>
+
+  <div id="customThemeRow" class="custom-theme-row" style="display: none;">
+    <label for="customThemeUrl">Theme URL:</label>
+    <div class="custom-theme-input">
+      <input type="text" id="customThemeUrl" placeholder="https://example.com/theme.css">
+      <button type="button" id="loadCustomTheme">Load</button>
     </div>
   </div>
 
@@ -282,6 +309,10 @@
       var copyBtn = document.getElementById('copyClipboard');
       var exportArea = document.getElementById('export-area');
       var codeWindow = document.getElementById('codeWindow');
+      var customThemeRow = document.getElementById('customThemeRow');
+      var customThemeUrlInput = document.getElementById('customThemeUrl');
+      var loadCustomThemeBtn = document.getElementById('loadCustomTheme');
+      var customThemeLink = null;
 
       // Set initial background
       exportArea.style.background = bgColorInput.value;
@@ -326,8 +357,44 @@
 
       // Theme change
       themeSelect.addEventListener('change', function(e) {
-        editor.setOption('theme', e.target.value);
-        updateCodeBackground(e.target.value);
+        if (e.target.value === 'custom') {
+          customThemeRow.style.display = 'block';
+        } else {
+          customThemeRow.style.display = 'none';
+          editor.setOption('theme', e.target.value);
+          updateCodeBackground(e.target.value);
+        }
+      });
+
+      // Load custom theme
+      loadCustomThemeBtn.addEventListener('click', function() {
+        var url = customThemeUrlInput.value.trim();
+        if (!url) {
+          alert('Please enter a theme URL');
+          return;
+        }
+
+        // Remove previous custom theme if any
+        if (customThemeLink) {
+          customThemeLink.remove();
+        }
+
+        // Extract theme name from URL (e.g., "theme-name.min.css" -> "theme-name")
+        var themeName = url.split('/').pop().replace('.min.css', '').replace('.css', '');
+
+        // Create and load the stylesheet
+        customThemeLink = document.createElement('link');
+        customThemeLink.rel = 'stylesheet';
+        customThemeLink.href = url;
+        customThemeLink.onload = function() {
+          editor.setOption('theme', themeName);
+          // For custom themes, use a dark fallback background
+          codeWindow.style.background = '#1e1e1e';
+        };
+        customThemeLink.onerror = function() {
+          alert('Failed to load theme from URL');
+        };
+        document.head.appendChild(customThemeLink);
       });
 
       // Language change

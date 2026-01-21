@@ -61,7 +61,6 @@
       font-size: 14px;
       line-height: 1.6;
       padding: 16px;
-      background: transparent;
     }
 
     .CodeMirror-scroll { min-height: 150px; }
@@ -197,9 +196,6 @@
 }</textarea>
     </div>
   </div>
-
-  <p class="input-hint">Tip: Drag and drop a file onto the page to load it.</p>
-
   <footer>
     <p>&copy; 2023 - <script>document.write(new Date().getFullYear());</script> by <a href="https://zansara.dev"><img src="https://zansara.dev/assets/avatar/avatar.svg" style="width: 1em; height: 1em; margin: 0 5px 0 0; display: inline;">Sara Zan</a> &CenterDot; <a href="https://github.com/ZanSara/single-page-helpers">GitHub</a> &CenterDot; <a href="https://zansara.dev/single-page-helpers">Home</a></p>
   </footer>
@@ -213,6 +209,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/css/css.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/clike/clike.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/go/go.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/addon/mode/simple.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/rust/rust.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/sql/sql.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.5/mode/markdown/markdown.min.js"></script>
@@ -227,7 +224,7 @@
       var textarea = document.getElementById('code');
       var editor = CodeMirror.fromTextArea(textarea, {
         mode: 'javascript',
-        theme: 'seti',
+        theme: 'monokai',
         lineNumbers: true,
         lineWrapping: true,
         viewportMargin: Infinity
@@ -250,9 +247,29 @@
       // Set initial background
       exportArea.style.background = bgColorInput.value;
 
+      // Theme background colors
+      var themeBackgrounds = {
+        'monokai': '#272822',
+        'dracula': '#282a36',
+        'seti': '#151718',
+        'material': '#263238',
+        'nord': '#2e3440',
+        'oceanic-next': '#1b2b34'
+      };
+
+      function updateCodeBackground(theme) {
+        var bg = themeBackgrounds[theme];
+        codeWindow.style.background = bg;
+      }
+
+      // Set initial code background and refresh editor
+      updateCodeBackground(themeSelect.value);
+      editor.refresh();
+
       // Theme change
       themeSelect.addEventListener('change', function(e) {
         editor.setOption('theme', e.target.value);
+        updateCodeBackground(e.target.value);
       });
 
       // Language change
